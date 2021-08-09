@@ -153,15 +153,15 @@ struct nessys_apu_regs_t {
 struct nessys_ppu_t {
 	uint32_t cycle;
 	uint8_t reg[NESSYS_PPU_REG_SIZE];
+	uint8_t status;
+	uint8_t addr_toggle;
+	uint8_t scroll[2];
+	uint16_t mem_addr;
+	uint16_t pad0;
 	uint8_t mem[NESSYS_PPU_MEM_SIZE];
 	uint8_t oam[NESSYS_PPU_OAM_SIZE];
 	uint8_t pal[NESSYS_PPU_PAL_SIZE];
 	bool name_tbl_vert_mirror;
-	uint8_t status;
-	uint8_t scroll[2];
-	uint8_t scroll_toggle;
-	uint16_t mem_addr;
-	uint16_t mem_addr_mask;
 	uint32_t chr_rom_size;
 	uint32_t chr_ram_size;
 	uint8_t* chr_rom_base;
@@ -175,6 +175,9 @@ struct nessys_t {
 	uint32_t cycle;
 	int32_t cycles_remaining;
 	uint32_t vblank_cycles; // cycles until next vblank
+	uint32_t sprite0_hit_cycles;  // cycles until sprite0 hit flag is set
+	int32_t scanline;  // scanline number
+	int32_t scanline_cycle;  // cycles after the start of current scanline
 	nessys_cpu_regs_t reg;
 	nessys_apu_regs_t apu;
 	nessys_ppu_t ppu;
@@ -190,8 +193,11 @@ struct nessys_t {
 	k2blendstate* bs_normal;
 	k2blendstate* bs_mask;
 	k2depthstate* ds_none;
+	k2depthstate* ds_normal;
+	k2depthstate* ds_sprite;
 	k2rasterizerstate* rs_normal;
 	k2shadergroup* sg_background;
+	k2shadergroup* sg_fill;
 	k2shadergroup* sg_sprite;
 	k2vertexgroup* vg_fullscreen;
 	k2vertexgroup* vg_sprite;
@@ -201,6 +207,7 @@ struct nessys_t {
 	k2constantbuffer* cb_sprite;
 	k2constantbuffer* cb_ppu;
 	k2constantgroup* cg_background;
+	k2constantgroup* cg_fill;
 	k2constantgroup* cg_sprite;
 };
 
@@ -215,6 +222,7 @@ bool nessys_load_cart(nessys_t* nes, FILE* fh);
 void nessys_default_memmap(nessys_t* nes);
 uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles);
 void nessys_unload_cart(nessys_t* nes);
+void nessys_cleanup(nessys_t* nes);
 
 inline uint8_t* nessys_mem(nessys_t* nes, uint16_t addr, uint16_t* bank, uint16_t* offset)
 {

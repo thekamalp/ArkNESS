@@ -49,5 +49,8 @@
     <FxCompile Include="sprite_ps.hlsl">
       <Filter>Source Files</Filter>
     </FxCompile>
+    <FxCompile Include="fill_ps.hlsl">
+      <Filter>Source Files</Filter>
+    </FxCompile>
   </ItemGroup>
 </Project>
