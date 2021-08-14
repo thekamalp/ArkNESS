@@ -1,0 +1,36 @@
+// Project:     ArkNESS
+// File:        mapper.h
+// Author:      Kamal Pillai
+// Date:        8/9/2021
+// Description:	NES memory mappers
+
+#pragma once
+#include "nessys.h"
+
+// maper 4 struct/constants
+
+// mask to distinguish which register is being programmed
+const uint16_t MAPPER4_ADDR_MASK = 0xE001;
+
+const uint16_t MAPPER4_ADDR_BANK_SELECT = 0x8000;
+const uint16_t MAPPER4_ADDR_BANK_DATA = 0x8001;
+const uint16_t MAPPER4_ADDR_MIRROR = 0xA000;
+const uint16_t MAPPER4_ADDR_PRG_RAM_PROTECT = 0xA001;
+const uint16_t MAPPER4_ADDR_IRQ_LATCH = 0xC000;
+const uint16_t MAPPER4_ADDR_IRQ_RELOAD = 0xC001;
+const uint16_t MAPPER4_ADDR_IRQ_DISABLE = 0xE000;
+const uint16_t MAPPER4_ADDR_IRQ_ENABLE = 0xE001;
+
+const uint8_t MAPPER4_REG_MASK[] = { 0xfe, 0xfe, 0xff, 0xff, 0xff, 0xff, 0x3f, 0x3f };
+
+struct mapper4_data {
+	uint8_t r[8];
+	uint8_t bank_select;
+	uint8_t prg_ram_protect;
+	uint8_t irq_latch;
+	uint8_t counter_write_pending;
+	uint8_t irq_enable;
+	uint8_t irq_counter;
+	uint8_t last_scanline;
+	uint8_t last_upper_ppu_addr;
+};

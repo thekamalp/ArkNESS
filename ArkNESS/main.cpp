@@ -6,7 +6,7 @@
 
 #include "nessys.h"
 
-const char* cart_file_name = "C:\\Users\\Arkesh\\emu\\roms\\nes\\Super Mario Bros. 2 (USA).nes";
+const char* cart_file_name = "C:\\Users\\Arkesh\\emu\\roms\\nes\\Faxanadu (U).nes";
 
 int main()
 {

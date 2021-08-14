@@ -66,6 +66,8 @@ const uint32_t NESSYS_PRG_NUM_BANKS = NESSYS_PRG_ADDR_SPACE / NESSYS_PRG_BANK_SI
 const uint32_t NESSYS_CHR_NUM_BANKS = NESSYS_CHR_ADDR_SPACE / NESSYS_CHR_BANK_SIZE;
 
 const uint32_t NESSYS_PRG_RAM_START = 0x6000;  // typical starting address of RAM
+const uint32_t NESSYS_PRM_RAM_SIZE = 0x2000;
+const uint32_t NESSYS_PRG_RAM_END = NESSYS_PRG_RAM_START + NESSYS_PRM_RAM_SIZE - 1;
 const uint32_t NESSYS_PRG_ROM_START = 0x8000;  // typical starting address of ROM
 
 const uint32_t NESSYS_SYS_RAM_START_BANK = NESSYS_RAM_WIN_MIN / NESSYS_PRG_BANK_SIZE;
@@ -73,6 +75,8 @@ const uint32_t NESSYS_PPU_REG_START_BANK = NESSYS_PPU_WIN_MIN / NESSYS_PRG_BANK_
 const uint32_t NESSYS_APU_REG_START_BANK = NESSYS_APU_WIN_MIN / NESSYS_PRG_BANK_SIZE;
 const uint32_t NESSYS_PRG_RAM_START_BANK = NESSYS_PRG_RAM_START / NESSYS_PRG_BANK_SIZE;
 const uint32_t NESSYS_PRG_ROM_START_BANK = NESSYS_PRG_ROM_START / NESSYS_PRG_BANK_SIZE;
+
+const uint32_t NESSYS_PRM_RAM_END_BANK = NESSYS_PRG_RAM_END / NESSYS_PRG_BANK_SIZE;
 
 const uint32_t NESSYS_CHR_ROM_START_BANK = NESSYS_CHR_ROM_WIN_MIN / NESSYS_CHR_BANK_SIZE;
 const uint32_t NESSYS_CHR_NTB_START_BANK = NESSYS_CHR_NTB_WIN_MIN / NESSYS_CHR_BANK_SIZE;
@@ -154,10 +158,13 @@ struct nessys_ppu_t {
 	uint32_t cycle;
 	uint8_t reg[NESSYS_PPU_REG_SIZE];
 	uint8_t status;
-	uint8_t addr_toggle;
+	uint8_t max_y;
 	uint8_t scroll[2];
 	uint16_t mem_addr;
-	uint16_t pad0;
+	uint16_t scroll_y;
+	uint16_t t_mem_addr;
+	uint8_t addr_toggle;
+	uint8_t scroll_y_changed;
 	uint8_t mem[NESSYS_PPU_MEM_SIZE];
 	uint8_t oam[NESSYS_PPU_OAM_SIZE];
 	uint8_t pal[NESSYS_PPU_PAL_SIZE];
@@ -168,22 +175,30 @@ struct nessys_ppu_t {
 	uint8_t* chr_ram_base;
 	uint16_t chr_rom_bank_mask[NESSYS_CHR_NUM_BANKS];
 	uint8_t* chr_rom_bank[NESSYS_CHR_NUM_BANKS];
+	uint8_t* mem_4screen;
 };
 
 struct nessys_t {
 	uint32_t mapper_id;
+	bool (*mapper_write)(nessys_t* nes, uint16_t addr, uint8_t data);
+	bool (*mapper_update)(nessys_t* nes);
+	void* mapper_data;
 	uint32_t cycle;
 	int32_t cycles_remaining;
 	uint32_t vblank_cycles; // cycles until next vblank
 	uint32_t sprite0_hit_cycles;  // cycles until sprite0 hit flag is set
+	uint32_t mapper_irq_cycles;   // cycles until mapper (external) irq signal is set
 	int32_t scanline;  // scanline number
 	int32_t scanline_cycle;  // cycles after the start of current scanline
+	uint8_t in_nmi;
+	uint8_t pad0[3];
 	nessys_cpu_regs_t reg;
 	nessys_apu_regs_t apu;
 	nessys_ppu_t ppu;
 	uint32_t prg_rom_size;
 	uint8_t sysmem[NESSYS_RAM_SIZE];
 	uint8_t* prg_rom_base;
+	uint8_t* prg_ram_base;
 	uint16_t prg_rom_bank_mask[NESSYS_PRG_NUM_BANKS];
 	uint8_t* prg_rom_bank[NESSYS_PRG_NUM_BANKS];
 	// rendering data structures
@@ -219,8 +234,10 @@ void nessys_power_cycle(nessys_t* nes);
 void nessys_reset(nessys_t* nes);
 bool nessys_load_cart_filename(nessys_t* nes, const char* filename);
 bool nessys_load_cart(nessys_t* nes, FILE* fh);
+bool nessys_init_mapper(nessys_t* nes);
 void nessys_default_memmap(nessys_t* nes);
 uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles);
+void nessys_cleanup_mapper(nessys_t* nes);
 void nessys_unload_cart(nessys_t* nes);
 void nessys_cleanup(nessys_t* nes);
 

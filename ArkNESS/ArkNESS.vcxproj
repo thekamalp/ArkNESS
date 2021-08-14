@@ -153,11 +153,13 @@
   <ItemGroup>
     <ClInclude Include="c6502.h" />
     <ClInclude Include="ines.h" />
+    <ClInclude Include="mapper.h" />
     <ClInclude Include="nessys.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ines.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="mapper.cpp" />
     <ClCompile Include="nessys.cpp" />
   </ItemGroup>
   <ItemGroup>

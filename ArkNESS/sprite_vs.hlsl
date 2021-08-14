@@ -37,13 +37,15 @@ VS_OUTPUT main( float2 pos : POSITION, uint instance : SV_InstanceID )
 	}
 	float2 start = float2(-128.0, -120.0) + sprite_start;
 	float2 win_scale = float2(160.0, -120.0);
+	pos.y = (ppu.x & 0x20) ? 2 * pos.y : pos.y;
+	float maxy = (ppu.x & 0x20) ? 16.0f : 8.0f;
 	o.pos.xy = ((pos + start) / win_scale);
 	//if ((sprite_data & 0xFF) >= 0xef) o.pos.xy = float2(0.0, 0.0);
 	o.pos.zw = float2(0.25, 1.0);
 	o.pos.z = o.pos.z + (float)((sprite_data >> 21) & 0x1) * 0.75;
 	o.texcoord.x = ((sprite_data >> 22) & 0x1) ? 8.0f - pos.x : pos.x;
-	o.texcoord.y = ((sprite_data >> 23) & 0x1) ? 8.0f - pos.y : pos.y;
-	o.texcoord.y = (ppu.x & 0x20) ? 2 * o.texcoord.y : o.texcoord.y;
+	o.texcoord.y = ((sprite_data >> 23) & 0x1) ? maxy - pos.y : pos.y;
+	//o.texcoord.y = (ppu.x & 0x20) ? 2 * o.texcoord.y : o.texcoord.y;
 
 	// get the palette index - upper 2 bits from sprite data structure
 	uint palette_index = (sprite_data & 0x30000) >> 14;

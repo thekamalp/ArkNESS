@@ -193,6 +193,7 @@ void K2CALLBACK nessys_display(void* ptr)
 	uint8_t buffer[8 * 1024];
 	uint32_t cycles;
 	nesssys_set_scanline(nes, -21);
+	//printf("cycles remaining: %d\n", nes->cycles_remaining);
 	nes->cycles_remaining = 0;
 	nes->vblank_cycles = (nes->cycles_remaining <= 0) ? 1 : nes->cycles_remaining;
 	cycles = nessys_exec_cpu_cycles(nes, NESSYS_PPU_SCANLINES_VBLANK_CLKS);  // 20 vblank lines
@@ -211,9 +212,19 @@ void K2CALLBACK nessys_display(void* ptr)
 	//printf("executed %d cycles\n", cycles);
 
 	nesssys_set_scanline(nes, 0);
+	nes->ppu.scroll_y = ((nes->ppu.reg[0] & 0x2) << 7) | nes->ppu.scroll[1];
+	nes->ppu.max_y = 240 + 256 * ((nes->ppu.scroll_y & 0xFF) >= 240) + (nes->ppu.scroll_y & 0x100);
+	nes->ppu.scroll_y_changed = true;
 	nes->cycles_remaining += NESSYS_PPU_SCANLINES_RENDERED_CLKS + NESSYS_PPU_SCANLINES_POST_RENDER_CLKS; // 241 scanlines
 	int i, c, index;
 	do {
+		if (nes->ppu.scroll_y_changed) {
+			uint16_t old_scroll_y = nes->ppu.scroll_y;
+			nes->ppu.scroll_y -= nes->scanline;
+			if ((nes->ppu.scroll_y & 0x100) != (old_scroll_y & 0x100) && ((old_scroll_y & 0xff) < 240)) nes->ppu.scroll_y -= 16;
+			nes->ppu.scroll_y_changed = false;
+			//nes->ppu.scroll_y = 237;
+		}
 		nes->gfx->k2Clear(K2CLEAR_DEPTH | K2CLEAR_STENCIL, clear_color, 1.0f, 0);
 		if (nes->ppu.reg[0x1] & 0x18) {
 			// initialize palette if rendering background or sprites
@@ -226,8 +237,9 @@ void K2CALLBACK nessys_display(void* ptr)
 			}
 			nes->gfx->k2CBUpdate(nes->cb_ppu, &(nes->ppu.reg));
 		}
-		//if (nes->scanline) printf("scanline %d ppureg[0]: 0x%x scroll: %d %d\n",
-		//		nes->scanline, nes->ppu.reg[0], nes->ppu.scroll[0], nes->ppu.scroll[1]);
+		//if (nes->scanline) 
+		//printf("scanline %d ppureg[0]: 0x%x scroll: %d %d %d ppu addr 0x%x\n",
+		//	nes->scanline, nes->ppu.reg[0], nes->ppu.scroll[0], nes->ppu.scroll[1], nes->ppu.scroll_y, nes->ppu.mem_addr);
 
 		if (nes->ppu.reg[0x1] & 0x08) {
 			// enable background rendering
@@ -529,17 +541,10 @@ bool nessys_load_cart(nessys_t* nes, FILE* fh)
 	nessys_unload_cart(nes);
 	success = ines_load_cart(nes, fh);
 	if (success) {
-		switch (nes->mapper_id) {
-		case 0:
-			break;
-		default:
-			printf("Uknown mapper id: %d\n", nes->mapper_id);
-			success = false;
-			break;
-		}
+		nessys_default_memmap(nes);
+		success = nessys_init_mapper(nes);
 	}
 	if(success) {
-		nessys_default_memmap(nes);
 		nes->win->SetKeyboardFunc(nessys_keyboard);
 		nes->win->SetDisplayFunc(nessys_display);
 		nes->win->SetIdleFunc(nessys_display);
@@ -572,6 +577,10 @@ void nessys_default_memmap(nessys_t* nes)
 	int b;
 	uint32_t mem_offset = 0;
 	if (nes->prg_rom_base) {
+		// map the last 32KB of rom data
+		// if rom is less than 32KB, then map from the beggining, and wrap the addresses
+		mem_offset = (nes->prg_rom_size <= NESSYS_PRG_ADDR_SPACE - NESSYS_PRG_ROM_START) ?
+			0 : (nes->prg_rom_size - (NESSYS_PRG_ADDR_SPACE - NESSYS_PRG_ROM_START));
 		for (b = NESSYS_PRG_ROM_START_BANK; b < NESSYS_PRG_NUM_BANKS; b++) {
 			nes->prg_rom_bank[b] = nes->prg_rom_base + mem_offset;
 			nes->prg_rom_bank_mask[b] = NESSYS_PRG_MEM_MASK;
@@ -580,6 +589,19 @@ void nessys_default_memmap(nessys_t* nes)
 		}
 	} else {
 		for (b = NESSYS_PRG_ROM_START_BANK; b < NESSYS_PRG_NUM_BANKS; b++) {
+			nes->prg_rom_bank[b] = &nes->reg.pad0;
+			nes->prg_rom_bank_mask[b] = 0x0;
+		}
+	}
+	if (nes->prg_ram_base) {
+		mem_offset = 0;
+		for (b = NESSYS_PRG_RAM_START_BANK; b <= NESSYS_PRM_RAM_END_BANK; b++) {
+			nes->prg_rom_bank[b] = nes->prg_ram_base + mem_offset;
+			nes->prg_rom_bank_mask[b] = NESSYS_PRG_MEM_MASK;
+			mem_offset += NESSYS_PRG_BANK_SIZE;
+		}
+	} else {
+		for (b = NESSYS_PRG_RAM_START_BANK; b <= NESSYS_PRM_RAM_END_BANK; b++) {
 			nes->prg_rom_bank[b] = &nes->reg.pad0;
 			nes->prg_rom_bank_mask[b] = 0x0;
 		}
@@ -599,14 +621,22 @@ void nessys_default_memmap(nessys_t* nes)
 		}
 	}
 	// map name table
-	nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 0] = nes->ppu.mem;
-	nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 3] = nes->ppu.mem + 0x400;
-	if (nes->ppu.name_tbl_vert_mirror) {
-		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 1] = nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 3];
-		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 2] = nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 0];
+	if (nes->ppu.mem_4screen) {
+		// if we allocated space for 4 screens, then directly map address space
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 0] = nes->ppu.mem;
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 1] = nes->ppu.mem + 0x400;
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 2] = nes->ppu.mem_4screen;
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 3] = nes->ppu.mem_4screen + 0x400;
 	} else {
-		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 1] = nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 0];
-		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 2] = nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 3];
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 0] = nes->ppu.mem;
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 3] = nes->ppu.mem + 0x400;
+		if (nes->ppu.name_tbl_vert_mirror) {
+			nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 1] = nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 3];
+			nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 2] = nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 0];
+		} else {
+			nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 1] = nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 0];
+			nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 2] = nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 3];
+		}
 	}
 	for (b = NESSYS_CHR_NTB_START_BANK + 4; b <= NESSYS_CHR_NTB_END_BANK; b++) {
 		nes->ppu.chr_rom_bank[b] = nes->ppu.chr_rom_bank[b - 4];
@@ -742,22 +772,42 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 			done = !vblank_interrupt;
 			if (vblank_interrupt) {
 				// get the stack base
+				//printf("-----------------------------------> Vblank interrupt from 0x%x, stack 0x%x\n", nes->reg.pc, nes->reg.s);
+				//if (nes->in_nmi) {
+				//	printf("NMI trapped during NMI!!\n");
+				//}
 				operand = nessys_mem(nes, 0x100, &bank, &offset);
 				*(operand + nes->reg.s) = nes->reg.pc >> 8;        nes->reg.s--;
 				*(operand + nes->reg.s) = nes->reg.pc & 0xFF;      nes->reg.s--;
 				*(operand + nes->reg.s) = nes->reg.p & ~C6502_P_B; nes->reg.s--;
 				nes->reg.pc = *((uint16_t*) nessys_mem(nes, NESSYS_NMI_VECTOR, &bank, &offset));
+				nes->reg.p |= C6502_P_I;
+				nes->in_nmi++;
 
-				//printf("Vblank interrupt\n");
 				cycle_count += NESSYS_PPU_PER_CPU_CLK * (7);
 				// cycles remaining may go negative if we don't have enough to cover the NMI
 				nes->cycles_remaining -= NESSYS_PPU_PER_CPU_CLK * (7);
 				nes->cycle += 7;
 			}
+		} else if( !(nes->reg.p & C6502_P_I) && nes->mapper_irq_cycles > 0 && nes->mapper_irq_cycles < ((int32_t)(NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles))) ) {
+			// mapper interrupt
+			// get the stack base
+			operand = nessys_mem(nes, 0x100, &bank, &offset);
+			*(operand + nes->reg.s) = nes->reg.pc >> 8;        nes->reg.s--;
+			*(operand + nes->reg.s) = nes->reg.pc & 0xFF;      nes->reg.s--;
+			*(operand + nes->reg.s) = nes->reg.p & ~C6502_P_B; nes->reg.s--;
+			nes->reg.pc = *((uint16_t*)nessys_mem(nes, NESSYS_IRQ_VECTOR, &bank, &offset));
+			nes->reg.p |= C6502_P_I;
+
+			//printf("-----------------------------------> Mapper interrupt scanline: %d\n", nes->scanline);
+			cycle_count += NESSYS_PPU_PER_CPU_CLK * (7);
+			// cycles remaining may go negative if we don't have enough to cover the NMI
+			nes->cycles_remaining -= NESSYS_PPU_PER_CPU_CLK * (7);
+			nes->cycle += 7;
 		} else {
 			skip_print = 1;
 			if (skip_print == 0) {
-				printf("0x%x: %s(0x%x) a:0x%x d:0x%x", nes->reg.pc, op->ins_name, *pc_ptr, addr, *operand);
+				printf("0x%x: %s(0x%x) a:0x%x d:0x%x c: %d scan: %d", nes->reg.pc, op->ins_name, *pc_ptr, addr, *operand, nes->cycle, nes->scanline);
 				if (op->flags & (C6502_FL_ILLEGAL | C6502_FL_UNDOCUMENTED)) {
 					printf(" - warning: illegal or undocumented instruction\n");
 				}
@@ -797,6 +847,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				break;
 			}
 
+			if (nes->reg.s == 0xfe) printf("------------------> stack about to overflow: 0x%x!!!\n", nes->reg.s);;
 			// perform the instruction's operation
 			switch (op->ins) {
 			case C6502_INS_ADC:
@@ -852,7 +903,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					}
 				} else {
 					rom_write = true;
-					printf("writing to rom area a=0x%x d=0x%x\n", addr, (uint8_t) result);
+					//printf("writing to rom area a=0x%x d=0x%x\n", addr, (uint8_t) result);
 				}
 				break;
 			case C6502_INS_BCC:
@@ -1023,7 +1074,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					}
 				} else {
 					rom_write = true;
-					printf("writing to rom area a=0x%x d=0x%x\n", addr, (uint8_t)result);
+					//printf("writing to rom area a=0x%x d=0x%x\n", addr, (uint8_t)result);
 				}
 				break;
 			case C6502_INS_DEX:
@@ -1074,7 +1125,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					}
 				} else {
 					rom_write = true;
-					printf("writing to rom area a=0x%x d=0x%x\n", addr, (uint8_t)result);
+					//printf("writing to rom area a=0x%x d=0x%x\n", addr, (uint8_t)result);
 				}
 				break;
 			case C6502_INS_INX:
@@ -1156,7 +1207,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					}
 				} else {
 					rom_write = true;
-					printf("writing to rom area a=0x%x d=0x%x\n", addr, (uint8_t)result);
+					//printf("writing to rom area a=0x%x d=0x%x\n", addr, (uint8_t)result);
 				}
 				break;
 			case C6502_INS_ORA:
@@ -1217,7 +1268,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					}
 				} else {
 					rom_write = true;
-					printf("writing to rom area a=0x%x d=0x%x\n", addr, (uint8_t)result);
+					//printf("writing to rom area a=0x%x d=0x%x\n", addr, (uint8_t)result);
 				}
 				break;
 			case C6502_INS_ROR:
@@ -1245,7 +1296,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					}
 				} else {
 					rom_write = true;
-					printf("writing to rom area a=0x%x d=0x%x\n", addr, (uint8_t)result);
+					//printf("writing to rom area a=0x%x d=0x%x\n", addr, (uint8_t)result);
 				}
 				break;
 			case C6502_INS_RTI:
@@ -1254,6 +1305,8 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				nes->reg.s++; nes->reg.p =  *(operand + nes->reg.s) | C6502_P_U | C6502_P_B;
 				nes->reg.s++; nes->reg.pc = *(operand + nes->reg.s);
 				nes->reg.s++; nes->reg.pc |= ((uint16_t) *(operand + nes->reg.s)) << 8;
+				if (nes->in_nmi) nes->in_nmi--;
+				//printf("-----------------------------------> Return Interrupt to 0x%x, stack 0x%x\n", nes->reg.pc, nes->reg.s);
 				break;
 			case C6502_INS_RTS:
 				// get the stack base
@@ -1308,7 +1361,8 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					}
 				} else {
 					rom_write = true;
-					printf("writing to rom area a=0x%x d=0x%x\n", addr, nes->reg.a);
+					result = nes->reg.a;
+					//printf("writing to rom area a=0x%x d=0x%x\n", addr, nes->reg.a);
 				}
 				break;
 			case C6502_INS_STX:
@@ -1330,7 +1384,8 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					}
 				} else {
 					rom_write = true;
-					printf("writing to rom area a=0x%x d=0x%x\n", addr, nes->reg.x);
+					result = nes->reg.x;
+					//printf("writing to rom area a=0x%x d=0x%x\n", addr, nes->reg.x);
 				}
 				break;
 			case C6502_INS_STY:
@@ -1352,7 +1407,8 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					}
 				} else {
 					rom_write = true;
-					printf("writing to rom area a=0x%x d=0x%x\n", addr, nes->reg.y);
+					result = nes->reg.y;
+					//printf("writing to rom area a=0x%x d=0x%x\n", addr, nes->reg.y);
 				}
 				break;
 			case C6502_INS_TAX:
@@ -1415,6 +1471,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 						nes->ppu.reg[7] = *nessys_ppu_mem(nes, nes->ppu.mem_addr);
 						//printf("PPU read: 0x%x 0x%x\n", nes->ppu.mem_addr, nes->ppu.reg[7]);
 						// if bit 2 is 0, increment address by 1 (one step horizontal), otherwise, increment by 32 (one step vertical)
+						//printf("reading ppu addr: 0x%x\n", nes->ppu.mem_4screen);
 						nes->ppu.mem_addr += !((nes->ppu.reg[0] & 0x4) >> 1) + ((nes->ppu.reg[0] & 0x4) << 3);
 					}
 					break;
@@ -1428,15 +1485,15 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				}
 			}
 			if (ppu_write) {
-				//printf("ppu_write offset 0x%x addr: 0x%x data: 0x%x scanline: %d scan cycle: %d data_change 0x%x\n", 
-				//	offset, nes->ppu.mem_addr, (offset == 0x14) ? nes->apu.reg[0x14] : nes->ppu.reg[offset], nes->scanline, nes->scanline_cycle, data_change);
+				//printf("ppu_write offset 0x%x addr: 0x%x data: 0x%x scanline: %d scan cycle: %d data_change 0x%x %d\n", 
+				//	offset, nes->ppu.mem_addr, (offset == 0x14) ? nes->apu.reg[0x14] : nes->ppu.reg[offset], nes->scanline, nes->scanline_cycle, data_change, ppu_ever_written);
 				if (bank == NESSYS_PPU_REG_START_BANK) {
 					nes->ppu.reg[2] = (nes->ppu.status & 0xE0) | (nes->ppu.reg[offset & 0x7] & 0x1F);
 				}
 				switch (offset) {
 				case 0:
 					// we only re-render frame if bits that change rendering changes
-					ppu_ever_written = ppu_ever_written || (data_change & 0x3b);
+					ppu_ever_written = ppu_ever_written || (data_change & 0x39);
 					break;
 				case 1:
 					// we only re-render the frame if the register actually changed value
@@ -1452,26 +1509,30 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					nes->ppu.reg[3]++;
 					break;
 				case 5:
-					// only update if the scroll value actually changed
-					ppu_ever_written = ppu_ever_written || (nes->ppu.scroll[nes->ppu.addr_toggle] != nes->ppu.reg[5]);
+					// only update if the scroll value actually changed, and only in x direction (y updates at next frame)
+					ppu_ever_written = ppu_ever_written || ((nes->ppu.addr_toggle == 0) && (nes->ppu.scroll[0] != nes->ppu.reg[5]));
 					nes->ppu.scroll[nes->ppu.addr_toggle] = nes->ppu.reg[5];
 					// update the vram address as well
+					//printf("update ppu addr for scroll %d %d %d addr: 0x%x\n", nes->ppu.scroll[0], nes->ppu.scroll[1], nes->ppu.scroll_y, nes->ppu.mem_addr);
+					//printf("ppu wr 2005: toggle %d 0x%x\n", nes->ppu.addr_toggle, nes->ppu.reg[5]);
 					if (nes->ppu.addr_toggle) {
-						nes->ppu.mem_addr &= 0x0c1f;
-						nes->ppu.mem_addr |= ((uint16_t)nes->ppu.reg[5] << 2) & 0x03e0;
-						nes->ppu.mem_addr |= ((uint16_t)nes->ppu.reg[5] << 12) & 0x7000;
+						nes->ppu.t_mem_addr &= 0x0c1f;
+						nes->ppu.t_mem_addr |= ((uint16_t)nes->ppu.reg[5] << 2) & 0x03e0;
+						nes->ppu.t_mem_addr |= ((uint16_t)nes->ppu.reg[5] << 12) & 0x7000;
 					} else {
-						nes->ppu.mem_addr &= 0xffe0;
-						nes->ppu.mem_addr |= (nes->ppu.reg[5] >> 3) & 0x1f;
+						nes->ppu.t_mem_addr &= 0xffe0;
+						nes->ppu.t_mem_addr |= (nes->ppu.reg[5] >> 3) & 0x1f;
 					}
 					nes->ppu.addr_toggle = !nes->ppu.addr_toggle;
 					break;
 				case 6:
 					ppu_ever_written = true;  // any access to this register during rendering can effect rendering
+					//printf("writing ppu addr: 0x%x\n", nes->ppu.mem_addr);
 					mem_addr_mask = 0xFF00 >> 8 * (nes->ppu.addr_toggle);
-					if (skip_print == 0) printf("addr_mask = 0x%x data=0x%x\n", mem_addr_mask, (((uint16_t)nes->ppu.reg[6] << 8) | nes->ppu.reg[6]));
-					nes->ppu.mem_addr &= ~mem_addr_mask;
-					nes->ppu.mem_addr |= (((uint16_t) nes->ppu.reg[6] << 8) | nes->ppu.reg[6]) & mem_addr_mask;
+					//printf("ppu wr 2006: toggle %d 0x%x\n", nes->ppu.addr_toggle, nes->ppu.reg[6]);
+					//printf("update vram from addr= 0x%x ", nes->ppu.mem_addr);
+					nes->ppu.t_mem_addr &= ~mem_addr_mask;
+					nes->ppu.t_mem_addr |= (((uint16_t) nes->ppu.reg[6] << 8) | nes->ppu.reg[6]) & mem_addr_mask;
 					// update scroll and nametable select signals
 					if (nes->ppu.addr_toggle) {
 						nes->ppu.scroll[0] &= 0x07;
@@ -1485,6 +1546,13 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 						nes->ppu.reg[0] &= 0xfc;
 						nes->ppu.reg[0] |= (nes->ppu.reg[6] >> 2) & 0x3;
 					}
+					if (nes->ppu.addr_toggle) {
+						nes->ppu.mem_addr = nes->ppu.t_mem_addr;
+						nes->ppu.scroll_y = ((nes->ppu.reg[0] & 0x2) << 7) | nes->ppu.scroll[1];
+						nes->ppu.max_y = 240 + 256 * ((nes->ppu.scroll_y & 0xFF) >= 240) + (nes->ppu.scroll_y & 0x100);
+						nes->ppu.scroll_y_changed = true;
+					}
+					//printf("to addr= 0x%x scroll: %d %d %d\n", nes->ppu.mem_addr, nes->ppu.scroll[0], nes->ppu.scroll[1], nes->ppu.scroll_y);
 					nes->ppu.addr_toggle = !nes->ppu.addr_toggle;
 					break;
 				case 7:
@@ -1499,6 +1567,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 						}
 					}
 					// if bit 2 is 0, increment address by 1 (one step horizontal), otherwise, increment by 32 (one step vertical)
+					//printf("writing ppu  addr: 0x%x\n", nes->ppu.mem_addr);
 					nes->ppu.mem_addr += !((nes->ppu.reg[0] & 0x4) >> 1) + ((nes->ppu.reg[0] & 0x4) << 3);
 					if (skip_print == 0) printf(" vram addr nest 0x%x\n", nes->ppu.mem_addr);
 					break;
@@ -1511,12 +1580,37 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					break;
 				}
 			}
+			if (rom_write) {
+				if(skip_print == 0) printf("writing to rom a: 0x%x d: 0x%x\n", addr, result);
+				ppu_ever_written |= nes->mapper_write(nes, addr, (uint8_t)result);
+			}
 			cycle_count += NESSYS_PPU_PER_CPU_CLK*(op->num_cycles + penalty_cycles);
 			// cycles remaining may go negative if we have a oam dma transfer
 			// the cycle penalty is accounted for until after th decision has already been bade to execute it
 			nes->cycles_remaining -= NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles);
 			nes->cycle += op->num_cycles + penalty_cycles;
 			nes->scanline_cycle += NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles);
+			if ((nes->ppu.reg[1] & 0x18) && (nes->scanline >= 0)) {
+				uint32_t a12_toggle_cycle;
+				switch (nes->ppu.reg[0] & 0x18) {
+				case 0x08:
+					a12_toggle_cycle = 260;
+					break;
+				case 0x10:
+					a12_toggle_cycle = 324;
+					break;
+				default:
+					a12_toggle_cycle = 1000;// that is, never
+					break;
+				}
+				if (nes->scanline_cycle < a12_toggle_cycle) {
+					nes->ppu.mem_addr &= ~0x1000;
+				} else {
+					//if((nes->ppu.mem_addr & 0x1000) == 0) printf("a12_toggled: %d\n", nes->scanline_cycle);
+					nes->ppu.mem_addr |= 0x1000;
+				}
+			}
+			ppu_ever_written |= nes->mapper_update(nes);
 			if (nes->scanline_cycle >= (int32_t)NESSYS_PPU_CLK_PER_SCANLINE) {
 				//if (nes->scanline_cycle > (int32_t)2 * NESSYS_PPU_CLK_PER_SCANLINE)
 				//	printf("Large scanline cycle: %d, scanline %d cycles remaining %d\n", nes->scanline_cycle, nes->scanline, nes->cycles_remaining);
@@ -1539,9 +1633,15 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 			if (nes->sprite0_hit_cycles > 0) {
 				if (nes->sprite0_hit_cycles <= NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles)) {
 					nes->sprite0_hit_cycles = 1;
-				}
-				else {
+				} else {
 					nes->sprite0_hit_cycles -= NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles);
+				}
+			}
+			if (nes->mapper_irq_cycles > 0) {
+				if (nes->mapper_irq_cycles <= NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles)) {
+					nes->mapper_irq_cycles = 1;
+				} else {
+					nes->mapper_irq_cycles -= NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles);
 				}
 			}
 		}
@@ -1552,9 +1652,18 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 
 void nessys_unload_cart(nessys_t* nes)
 {
+	nessys_cleanup_mapper(nes);
 	nes->win->SetDisplayFunc(NULL);
 	nes->win->SetDisplayFunc(NULL);
 	nes->win->SetIdleFunc(NULL);
+	if (nes->ppu.mem_4screen) {
+		free(nes->ppu.mem_4screen);
+		nes->ppu.mem_4screen = NULL;
+	}
+	if (nes->prg_ram_base) {
+		free(nes->prg_ram_base);
+		nes->prg_ram_base = NULL;
+	}
 	if (nes->prg_rom_base) {
 		free(nes->prg_rom_base);
 		nes->prg_rom_base = NULL;
