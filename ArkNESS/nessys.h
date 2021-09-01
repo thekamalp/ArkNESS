@@ -91,6 +91,7 @@ const uint16_t NESSYS_IRQ_VECTOR = 0xFFFE;  // also used for BRK
 
 // ppu timing - ntsc
 const uint32_t NESSYS_PPU_PER_CPU_CLK = 3;
+const uint32_t NESSYS_PPU_PER_APU_CLK = 2 * NESSYS_PPU_PER_CPU_CLK;
 const uint32_t NESSYS_PPU_CLK_PER_SCANLINE = 341;
 const uint32_t NESSYS_PPU_SCANLINES_RENDERED = 240;
 const uint32_t NESSYS_PPU_SCANLINES_POST_RENDER = 1;
@@ -112,6 +113,7 @@ const float NESSYS_PPU_PALETTE[] = {
 	236/255.0f, 238/255.0f, 236/255.0f,  168/255.0f, 204/255.0f, 236/255.0f,  188/255.0f, 188/255.0f, 236/255.0f,  212/255.0f, 178/255.0f, 236/255.0f,  236/255.0f, 174/255.0f, 236/255.0f,  236/255.0f, 174/255.0f, 212/255.0f,  236/255.0f, 180/255.0f, 176/255.0f,  228/255.0f, 196/255.0f, 144/255.0f,  204/255.0f, 210/255.0f, 120/255.0f,  180/255.0f, 222/255.0f, 120/255.0f,  168/255.0f, 226/255.0f, 144/255.0f,  152/255.0f, 226/255.0f, 180/255.0f,  160/255.0f, 214/255.0f, 228/255.0f,  160/255.0f, 162/255.0f, 160/255.0f,    0/255.0f,   0/255.0f,   0/255.0f,    0/255.0f,   0/255.0f,   0/255.0f
 };
 
+const uint32_t NESSYS_APU_STATUS_OFFSET = 0x15;
 const uint32_t NESSYS_APU_JOYPAD0_OFFSET = 0x16;
 const uint32_t NESSYS_APU_JOYPAD1_OFFSET = 0x17;
 const uint32_t NESSYS_APU_FRAME_COUNTER_OFFSET = 0x17;
@@ -134,6 +136,36 @@ const uint8_t NESSYS_STD_CONTROLLER_BUTTON_DOWN_MASK   = 1 << NESSYS_STD_CONTROL
 const uint8_t NESSYS_STD_CONTROLLER_BUTTON_LEFT_MASK   = 1 << NESSYS_STD_CONTROLLER_BUTTON_LEFT;
 const uint8_t NESSYS_STD_CONTROLLER_BUTTON_RIGHT_MASK  = 1 << NESSYS_STD_CONTROLLER_BUTTON_RIGHT;
 
+const uint32_t NESSYS_SND_SAMPLES_PER_SECOND = 44100;
+const uint32_t NESSYS_SND_BITS_PER_SAMPLE = 16;
+const uint32_t NESSYS_SND_BUFFERS = 6;
+const uint32_t NESSYS_SND_SAMPLES = (NESSYS_SND_BUFFERS * NESSYS_SND_SAMPLES_PER_SECOND) / 60;
+const uint32_t NESSYS_SND_BYTES = (NESSYS_SND_BITS_PER_SAMPLE * NESSYS_SND_SAMPLES) / 8;
+const uint32_t NESSYS_SND_SAMPLES_PER_BUFFER = NESSYS_SND_SAMPLES / NESSYS_SND_BUFFERS;
+const uint32_t NESSYS_SND_BYTES_PER_BUFFER = (NESSYS_SND_BITS_PER_SAMPLE * NESSYS_SND_SAMPLES_PER_BUFFER) / 8;
+const uint32_t NESSYS_SND_START_POSITION = 3 * NESSYS_SND_BYTES_PER_BUFFER;
+
+// samples are counted in fixed point (12.20)
+const uint32_t NESSYS_SND_SAMPLES_FRAC_LOG2 = 20;
+const uint32_t NESSYS_SND_SAMPLES_FRAC = (1 << NESSYS_SND_SAMPLES_FRAC_LOG2);
+const uint32_t NESSYS_SND_SAMPLES_FRAC_MASK = NESSYS_SND_SAMPLES_FRAC - 1;
+const uint32_t NESSYS_SND_SAMPLES_FRAC_PER_CYCLE = (NESSYS_SND_SAMPLES_PER_BUFFER << NESSYS_SND_SAMPLES_FRAC_LOG2) / NESSYS_PPU_SCANLINES_PER_FRAME_CLKS;
+
+const uint32_t NESSYS_SND_APU_FRAC_LOG2 = 10;
+const uint32_t NESSYS_SND_APU_FRAC = (1 << NESSYS_SND_APU_FRAC_LOG2);
+const uint32_t NESSYS_SND_APU_FRAC_MASK = NESSYS_SND_APU_FRAC - 1;
+const uint32_t NESSYS_SND_APU_CLKS_PER_FRAME = NESSYS_PPU_SCANLINES_PER_FRAME_CLKS / NESSYS_PPU_PER_APU_CLK;
+const uint32_t NESSYS_SND_APU_FRAC_PER_FRAME = NESSYS_SND_APU_CLKS_PER_FRAME << NESSYS_SND_APU_FRAC_LOG2;
+const uint32_t NESSYS_SND_APU_FRAC_PER_SAMPLE = NESSYS_SND_APU_FRAC_PER_FRAME / NESSYS_SND_SAMPLES_PER_BUFFER;
+const uint32_t NESSYS_SND_CPU_CLKS_PER_FRAME = NESSYS_PPU_SCANLINES_PER_FRAME_CLKS / NESSYS_PPU_PER_CPU_CLK;
+const uint32_t NESSYS_SND_CPU_FRAC_PER_FRAME = NESSYS_SND_CPU_CLKS_PER_FRAME << NESSYS_SND_APU_FRAC_LOG2;
+const uint32_t NESSYS_SND_CPU_FRAC_PER_SAMPLE = NESSYS_SND_CPU_FRAC_PER_FRAME / NESSYS_SND_SAMPLES_PER_BUFFER;
+
+const uint32_t NESSYS_SND_FRAME_FRAC_LOG2 = 20;
+const uint32_t NESSYS_SND_FRAME_FRAC = 1 << NESSYS_SND_FRAME_FRAC_LOG2;
+const uint32_t NESSYS_SND_FRAME_FRAC_MASK = NESSYS_SND_FRAME_FRAC - 1;
+const uint32_t NESSYS_SND_FRAME_FRAC_PER_SAMPLE = (4 << NESSYS_SND_FRAME_FRAC_LOG2) / NESSYS_SND_SAMPLES_PER_BUFFER;
+
 // system structs
 struct nessys_cpu_regs_t {
 	uint8_t a;
@@ -145,13 +177,116 @@ struct nessys_cpu_regs_t {
 	uint8_t pad0;
 };
 
+const uint8_t NESSYS_APU_PULSE_FLAG_SWEEP_ONES_COMP_BIT = 0;
+const uint8_t NESSYS_APU_PULSE_FLAG_ENV_START_BIT = 1;
+const uint8_t NESSYS_APU_PULSE_FLAG_SWEEP_NEGATE_BIT = 3;
+const uint8_t NESSYS_APU_PULSE_FLAG_CONST_VOLUME_BIT = 4;
+const uint8_t NESSYS_APU_PULSE_FLAG_HALT_LENGTH_BIT = 5;
+const uint8_t NESSYS_APU_PULSE_FLAG_SWEEP_RELOAD_BIT = 6;
+const uint8_t NESSYS_APU_PULSE_FLAG_SWEEP_EN_BIT = 7;
+
+const uint8_t NESSYS_APU_PULSE_FLAG_SWEEP_ONES_COMP = (1 << NESSYS_APU_PULSE_FLAG_SWEEP_ONES_COMP_BIT);
+const uint8_t NESSYS_APU_PULSE_FLAG_ENV_START = (1 << NESSYS_APU_PULSE_FLAG_ENV_START_BIT);
+const uint8_t NESSYS_APU_PULSE_FLAG_SWEEP_NEGATE = (1 << NESSYS_APU_PULSE_FLAG_SWEEP_NEGATE_BIT);
+const uint8_t NESSYS_APU_PULSE_FLAG_CONST_VOLUME = (1 << NESSYS_APU_PULSE_FLAG_CONST_VOLUME_BIT);
+const uint8_t NESSYS_APU_PULSE_FLAG_HALT_LENGTH = (1 << NESSYS_APU_PULSE_FLAG_HALT_LENGTH_BIT);
+const uint8_t NESSYS_APU_PULSE_FLAG_SWEEP_RELOAD = (1 << NESSYS_APU_PULSE_FLAG_SWEEP_RELOAD_BIT);
+const uint8_t NESSYS_APU_PULSE_FLAG_SWEEP_EN = (1 << NESSYS_APU_PULSE_FLAG_SWEEP_EN_BIT);
+
+const uint8_t NESSYS_APU_TRIANGLE_FLAG_RELOAD_BIT = 0;
+const uint8_t NESSYS_APU_TRIANGLE_FLAG_CONTROL_BIT = 7;
+
+const uint8_t NESSYS_APU_TRIANGLE_FLAG_RELOAD = (1 << NESSYS_APU_TRIANGLE_FLAG_RELOAD_BIT);
+const uint8_t NESSYS_APU_TRIANGLE_FLAG_CONTROL = (1 << NESSYS_APU_TRIANGLE_FLAG_CONTROL_BIT);
+
+const uint8_t NESSYS_APU_NOISE_FLAG_MODE_BIT = 7;
+const uint8_t NESSYS_APU_NOISE_FLAG_MODE = (1 << NESSYS_APU_NOISE_FLAG_MODE_BIT);
+
+const uint8_t NESSYS_APU_DMC_FLAG_IRQ_ENABLE_BIT = 7;
+const uint8_t NESSYS_APU_DMC_FLAG_LOOP_BIT = 6;
+const uint8_t NESSYS_APU_DMC_FLAG_DMA_ENABLE_BIT = 4;
+
+const uint8_t NESSYS_APU_DMC_FLAG_IRQ_ENABLE = (1 << NESSYS_APU_DMC_FLAG_IRQ_ENABLE_BIT);
+const uint8_t NESSYS_APU_DMC_FLAG_LOOP = (1 << NESSYS_APU_DMC_FLAG_LOOP_BIT);
+const uint8_t NESSYS_APU_DMC_FLAG_DMA_ENABLE = (1 << NESSYS_APU_DMC_FLAG_DMA_ENABLE_BIT);
+
+const uint8_t NESSYS_APU_PULSE_DUTY_TABLE[4] = { 0x02, 0x06, 0x1e, 0xf9 };
+
+const uint8_t NESSYS_APU_PULSE_LENGTH_TABLE[32] = { 10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14, 12, 26, 14,
+													12, 16, 24, 18, 48, 20, 96, 22, 192, 24, 72, 26, 16, 28, 32, 30 };
+
+const uint16_t NESSYS_APU_NOISE_PERIOD_TABLE[16] = { 4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068 };
+
+const uint16_t NESSYS_APU_DMC_PERIOD_TABLE[16] = { 428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128, 106, 84, 72, 54 };
+
+struct nessys_apu_envelope_t {
+	uint8_t volume;
+	uint8_t divider;
+	uint8_t decay;
+	uint8_t flags;
+};
+struct nessys_apu_pulse_t {
+	uint32_t cur_time_frac;
+	uint16_t period;
+	uint8_t duty;
+	uint8_t duty_phase;
+	nessys_apu_envelope_t env;
+	uint8_t length;
+	uint8_t sweep_period;
+	uint8_t sweep_shift;
+	uint8_t sweep_divider;
+	uint16_t sweep_orig_period;
+	uint16_t pad;
+};
+
+struct nessys_apu_triangle_t {
+	uint32_t cur_time_frac;
+	uint16_t period;
+	uint8_t length;
+	uint8_t linear;
+	uint8_t reload;
+	uint8_t sequence;
+	uint8_t flags;
+	uint8_t pad;
+};
+
+struct nessys_apu_noise_t {
+	uint32_t cur_time_frac;
+	uint16_t period;
+	uint16_t shift_reg;
+	nessys_apu_envelope_t env;
+	uint8_t length;
+	uint8_t pad[3];
+};
+
+struct nessys_apu_dmc_t {
+	uint32_t cur_time_frac;
+	uint16_t start_addr;
+	uint16_t length;
+	uint16_t cur_addr;
+	uint16_t bytes_remaining;
+	uint16_t period;
+	uint16_t pad;
+	uint8_t delta_buffer;
+	uint8_t output;
+	uint8_t flags;
+	uint8_t bits_remaining;
+};
+
 struct nessys_apu_regs_t {
 	uint8_t reg[NESSYS_APU_SIZE];
 	uint8_t joy_control;
 	uint8_t frame_counter;
+	uint8_t status;
+	uint8_t pad1;
 	uint8_t joypad[2];
 	uint8_t latched_joypad[2];
-	uint8_t pad[NESSYS_APU_MASK + 1 - NESSYS_APU_SIZE - 6];
+	uint32_t sample_frac_generated;
+	uint32_t frame_frac_counter;
+	nessys_apu_pulse_t pulse[2];
+	nessys_apu_triangle_t triangle;
+	nessys_apu_noise_t noise;
+	nessys_apu_dmc_t dmc;
 };
 
 struct nessys_ppu_t {
@@ -187,7 +322,9 @@ struct nessys_t {
 	int32_t cycles_remaining;
 	uint32_t vblank_cycles; // cycles until next vblank
 	uint32_t sprite0_hit_cycles;  // cycles until sprite0 hit flag is set
-	uint32_t mapper_irq_cycles;   // cycles until mapper (external) irq signal is set
+	uint32_t mapper_irq_cycles;   // cycles until mapper (external) irq signal is set; if 0, no irq pending
+	uint32_t frame_irq_cycles;    // cycles until a frame irq signal is set; if 0, no irq pending
+	uint32_t dmc_irq_cycles;      // cycles until a dmc irq signal is set; if 0, no irq pending
 	int32_t scanline;  // scanline number
 	int32_t scanline_cycle;  // cycles after the start of current scanline
 	uint8_t in_nmi;
@@ -224,6 +361,10 @@ struct nessys_t {
 	k2constantgroup* cg_background;
 	k2constantgroup* cg_fill;
 	k2constantgroup* cg_sprite;
+	k2sbuf* sb_main;
+	uint32_t sbuf_frame_start;
+	uint32_t sbuf_offset;
+	k2timer* timer;
 };
 
 #include "c6502.h"

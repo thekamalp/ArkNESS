@@ -7,7 +7,28 @@
 #pragma once
 #include "nessys.h"
 
-// maper 4 struct/constants
+// mapper 1 structs/constants
+
+// mask to distinguish which register is being programmed
+const uint16_t MAPPER1_ADDR_MASK = 0xE000;
+
+const uint16_t MAPPER1_ADDR_CONTROL = 0x8000;
+const uint16_t MAPPER1_ADDR_CHR_BANK0 = 0xA000;
+const uint16_t MAPPER1_ADDR_CHR_BANK1 = 0xC000;
+const uint16_t MAPPER1_ADDR_PRG_BANK = 0xE000;
+
+const uint8_t MAPPER1_SHIFT_REG_RESET = 0x10;
+
+struct mapper1_data {
+	uint8_t shift_reg;
+	uint8_t pad0[3];
+	uint8_t control;
+	uint8_t chr_bank0;
+	uint8_t chr_bank1;
+	uint8_t prg_bank;
+};
+
+// mapper 4 struct/constants
 
 // mask to distinguish which register is being programmed
 const uint16_t MAPPER4_ADDR_MASK = 0xE001;

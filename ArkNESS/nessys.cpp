@@ -5,10 +5,13 @@
 // Description:	NES system functions
 
 #include "nessys.h"
+#include <math.h>
 
 void nessys_init(nessys_t* nes)
 {
 	memset(nes, 0, sizeof(nessys_t));
+	nes->apu.pulse[0].env.flags = NESSYS_APU_PULSE_FLAG_SWEEP_ONES_COMP;
+	nes->apu.noise.shift_reg = 0x01;
 	k2image::k2Initialize();
 	k2error_SetHandler(k2error_StdOutHandler);
 	k2win::k2SetGfxType(K2GFX_DIRECTX_11);
@@ -126,6 +129,17 @@ void nessys_init(nessys_t* nes)
 	celem[3].constant_buffer = nes->cb_sprite;
 	nes->cg_sprite = nes->gfx->k2CreateConstantGroup(nes->sg_sprite, 4, celem);
 
+	nes->sb_main = nes->win->k2CreateSBuffer(NESSYS_SND_SAMPLES_PER_SECOND, NESSYS_SND_BITS_PER_SAMPLE, NESSYS_SND_SAMPLES);
+	void* sbuf_ptr = nes->sb_main->k2MapSBufForWrite(0, 2 * NESSYS_SND_SAMPLES);
+	memset(sbuf_ptr, 0, 2 * NESSYS_SND_SAMPLES);
+	nes->sb_main->k2UnmapSBuf(sbuf_ptr, 0, 2 * NESSYS_SND_SAMPLES);
+
+	// reset write pointer
+	nes->sbuf_offset = NESSYS_SND_START_POSITION;
+	sbuf_ptr = nes->sb_main->k2MapSBufForWrite(nes->sbuf_offset, NESSYS_SND_BYTES_PER_BUFFER);
+	nes->sb_main->k2UnmapSBuf(sbuf_ptr, nes->sbuf_offset, NESSYS_SND_BYTES_PER_BUFFER);
+
+	nes->timer = nes->win->k2CreateTimer();
 }
 
 void nessys_power_cycle(nessys_t* nes)
@@ -142,6 +156,8 @@ void nessys_power_cycle(nessys_t* nes)
 	memset(nes->sysmem, 0, NESSYS_RAM_SIZE);
 	uint16_t bank, offset;
 	nes->reg.pc = *((uint16_t*)nessys_mem(nes, NESSYS_RST_VECTOR, &bank, &offset));
+	nes->apu.noise.shift_reg = 0x01;
+	nes->sb_main->k2StopSBuffer();
 }
 
 void nessys_reset(nessys_t* nes)
@@ -156,6 +172,8 @@ void nessys_reset(nessys_t* nes)
 	nes->ppu.reg[0x7] = 0x0;
 	uint16_t bank, offset;
 	nes->reg.pc = *((uint16_t*)nessys_mem(nes, NESSYS_RST_VECTOR, &bank, &offset));
+	nes->apu.noise.shift_reg = 0x01;
+	nes->sb_main->k2StopSBuffer();
 }
 
 bool nessys_load_cart_filename(nessys_t* nes, const char* filename)
@@ -182,6 +200,301 @@ void nesssys_set_scanline(nessys_t* nes, int32_t scanline)
 	}
 }
 
+void nessys_apu_env_tick(nessys_apu_envelope_t* envelope)
+{
+	if (envelope->flags & NESSYS_APU_PULSE_FLAG_ENV_START) {
+		envelope->decay = 15;
+		envelope->divider = envelope->volume;
+		envelope->flags &= ~NESSYS_APU_PULSE_FLAG_ENV_START;
+	} else {
+		if (envelope->divider) {
+			envelope->divider--;
+		} else {
+			envelope->divider = envelope->volume;
+			if (envelope->decay) {
+				envelope->decay--;
+			} else if(envelope->flags & NESSYS_APU_PULSE_FLAG_HALT_LENGTH) {
+				// halt flag is also used to loop env
+				envelope->decay = 15;
+			}
+		}
+	}
+}
+
+void nessys_apu_tri_linear_tick(nessys_apu_triangle_t* triangle)
+{
+	if (triangle->flags & NESSYS_APU_TRIANGLE_FLAG_RELOAD) {
+		triangle->linear = triangle->reload;
+	} else if (triangle->linear) {
+		triangle->linear--;
+	}
+	if ((triangle->flags & NESSYS_APU_TRIANGLE_FLAG_CONTROL) == 0) {
+		triangle->flags &= ~NESSYS_APU_TRIANGLE_FLAG_RELOAD;
+	}
+}
+
+void nessys_apu_tri_length_tick(nessys_apu_triangle_t* triangle)
+{
+	if (triangle->length && !(triangle->flags & NESSYS_APU_TRIANGLE_FLAG_CONTROL)) {
+		triangle->length--;
+	}
+}
+
+void nessys_apu_noise_length_tick(nessys_apu_noise_t* noise)
+{
+	if (noise->length && !(noise->env.flags & NESSYS_APU_PULSE_FLAG_HALT_LENGTH)) {
+		noise->length--;
+	}
+}
+
+uint16_t nessys_apu_sweep_get_target_period(nessys_apu_pulse_t* pulse)
+{
+	uint16_t delta = pulse->period >> pulse->sweep_shift;
+	uint16_t target_period = pulse->period;
+	if (pulse->env.flags & NESSYS_APU_PULSE_FLAG_SWEEP_NEGATE) {
+		target_period -= delta + ((pulse->env.flags & NESSYS_APU_PULSE_FLAG_SWEEP_ONES_COMP) && (pulse->sweep_shift != 0));
+	} else {
+		target_period += delta;
+	}
+	return target_period;
+}
+
+void nessys_apu_sweep_tick(nessys_apu_pulse_t* pulse)
+{
+	uint16_t target_period = nessys_apu_sweep_get_target_period(pulse);
+	bool mute = (pulse->period < 8) || (target_period > 0x7ff) || (pulse->length == 0);
+	if (pulse->sweep_divider == 0 && (pulse->env.flags & NESSYS_APU_PULSE_FLAG_SWEEP_EN) && pulse->sweep_shift && !mute) {
+		pulse->period = target_period;
+	}
+	if (pulse->sweep_divider == 0 || (pulse->env.flags & NESSYS_APU_PULSE_FLAG_SWEEP_RELOAD)) {
+		pulse->sweep_divider = pulse->sweep_period;
+		pulse->env.flags &= ~NESSYS_APU_PULSE_FLAG_SWEEP_RELOAD;
+	} else {
+		pulse->sweep_divider--;
+	}
+	// also handle length
+	if (pulse->length && !(pulse->env.flags & NESSYS_APU_PULSE_FLAG_HALT_LENGTH)) {
+		pulse->length--;
+	}
+}
+
+uint8_t nessys_apu_gen_pulse(nessys_apu_pulse_t* pulse)
+{
+	if (pulse->period) {
+		pulse->cur_time_frac += NESSYS_SND_APU_FRAC_PER_SAMPLE;
+		while ((pulse->cur_time_frac >> NESSYS_SND_APU_FRAC_LOG2) > pulse->period) {
+			pulse->duty_phase++;
+			pulse->duty_phase &= 0x7;
+			pulse->cur_time_frac -= (pulse->period << NESSYS_SND_APU_FRAC_LOG2);
+		}
+	}
+	uint8_t sound = (pulse->env.flags & NESSYS_APU_PULSE_FLAG_CONST_VOLUME) ? pulse->env.volume : pulse->env.decay;
+	uint16_t target_period = nessys_apu_sweep_get_target_period(pulse);
+	bool mute = (pulse->period < 8) || (target_period > 0x7ff);
+	mute = mute || (((pulse->duty >> pulse->duty_phase) & 0x1) == 0);
+	mute = mute || (pulse->length == 0);// && !(pulse->env.flags & NESSYS_APU_PULSE_FLAG_HALT_LENGTH));
+	sound = (mute) ? 0 : sound;
+	return sound;
+}
+
+uint8_t nessys_apu_gen_triangle(nessys_apu_triangle_t* triangle)
+{
+	if (triangle->period) {
+		triangle->cur_time_frac += NESSYS_SND_CPU_FRAC_PER_SAMPLE;
+		while ((triangle->cur_time_frac >> NESSYS_SND_APU_FRAC_LOG2) > triangle->period) {
+			triangle->sequence++;
+			triangle->sequence &= 0x1f;
+			triangle->cur_time_frac -= (triangle->period << NESSYS_SND_APU_FRAC_LOG2);
+		}
+	}
+	uint8_t sound = triangle->sequence ^ ((triangle->sequence & 0x10) ? 0x1f : 0x00);
+	if (triangle->linear == 0 || triangle->length == 0) sound = 0;
+	return sound;
+}
+
+uint8_t nessys_apu_gen_noise(nessys_apu_noise_t* noise)
+{
+	uint16_t feedback = 0;
+	if (noise->period) {
+		noise->cur_time_frac += NESSYS_SND_APU_FRAC_PER_SAMPLE;
+		uint8_t xor_bit = 1 + ((noise->env.flags & NESSYS_APU_NOISE_FLAG_MODE) ? 5 : 0);
+		while ((noise->cur_time_frac >> NESSYS_SND_APU_FRAC_LOG2) > noise->period) {
+			feedback = ((noise->shift_reg ^ (noise->shift_reg >> xor_bit)) & 0x1) << 14;
+			noise->shift_reg = (noise->shift_reg >> 1) | feedback;
+			noise->cur_time_frac -= (noise->period << NESSYS_SND_APU_FRAC_LOG2);
+		}
+	}
+	uint8_t sound = (noise->env.flags & NESSYS_APU_PULSE_FLAG_CONST_VOLUME) ? noise->env.volume : noise->env.decay;
+	if (noise->length == 0 || (noise->shift_reg & 0x1) == 0) {
+		sound = 0;
+	}
+	return sound;
+}
+
+uint8_t nessys_apu_gen_dmc(nessys_t* nes)
+{
+	nessys_apu_dmc_t* dmc = &(nes->apu.dmc);
+	if (dmc->bytes_remaining == 0 && (dmc->flags & NESSYS_APU_DMC_FLAG_DMA_ENABLE)) {
+		dmc->cur_addr = dmc->start_addr;
+		dmc->bytes_remaining = dmc->length;
+	}
+	if (dmc->bits_remaining == 0 && dmc->bytes_remaining != 0) {
+		uint16_t bank, offset;
+		dmc->delta_buffer = *nessys_mem(nes, dmc->cur_addr, &bank, &offset);
+		dmc->bits_remaining = 8;
+		dmc->cur_addr++;
+		dmc->cur_addr |= 0x8000;
+		dmc->bytes_remaining--;
+		if (dmc->bytes_remaining == 0 && !(dmc->flags & NESSYS_APU_DMC_FLAG_LOOP)) {
+			dmc->flags &= ~NESSYS_APU_DMC_FLAG_DMA_ENABLE;
+		}
+		if (dmc->cur_addr == dmc->start_addr) {
+			dmc->cur_time_frac = 0;
+		}
+	}
+	if (dmc->bits_remaining != 0 && dmc->period != 0) {
+		dmc->cur_time_frac += NESSYS_SND_CPU_FRAC_PER_SAMPLE;
+		while ((dmc->cur_time_frac >> NESSYS_SND_APU_FRAC_LOG2) > dmc->period) {
+			if (dmc->delta_buffer & 0x1) {
+				if (dmc->output < 126) dmc->output += 2;
+			} else {
+				if (dmc->output > 2) dmc->output -= 2;
+			}
+			dmc->delta_buffer >>= 1;
+			dmc->bits_remaining--;
+			dmc->cur_time_frac -= (dmc->period << NESSYS_SND_APU_FRAC_LOG2);
+		}
+	}
+	return dmc->output;
+}
+
+int16_t nessys_gen_sound_sample(nessys_t* nes)
+{
+	// first increment frame conter, and see if it ticks
+	uint32_t last_frame_tick = nes->apu.frame_frac_counter >> NESSYS_SND_FRAME_FRAC_LOG2;
+	nes->apu.frame_frac_counter += NESSYS_SND_FRAME_FRAC_PER_SAMPLE;
+	uint32_t cur_frame_tick = nes->apu.frame_frac_counter >> NESSYS_SND_FRAME_FRAC_LOG2;
+	if (cur_frame_tick > last_frame_tick) {
+		uint32_t max_frame_tick = (nes->apu.frame_counter & 0x80) ? 4 : 3;
+		if (cur_frame_tick > max_frame_tick) {
+			cur_frame_tick = 0;
+			nes->apu.frame_frac_counter &= NESSYS_SND_FRAME_FRAC_MASK;
+		}
+		if (last_frame_tick < 4) {
+			nessys_apu_env_tick(&(nes->apu.pulse[0].env));
+			nessys_apu_env_tick(&(nes->apu.pulse[1].env));
+			nessys_apu_env_tick(&(nes->apu.noise.env));
+			nessys_apu_tri_linear_tick(&(nes->apu.triangle));
+			if (!(last_frame_tick & 1)) {
+				nessys_apu_sweep_tick(&(nes->apu.pulse[0]));
+				nessys_apu_sweep_tick(&(nes->apu.pulse[1]));
+				nessys_apu_noise_length_tick(&(nes->apu.noise));
+				nessys_apu_tri_length_tick(&(nes->apu.triangle));
+			}
+		}
+	}
+	uint8_t pulse_sound = nessys_apu_gen_pulse(&(nes->apu.pulse[0])) + 
+		nessys_apu_gen_pulse(&(nes->apu.pulse[1]));
+	uint8_t triangle_sound = nessys_apu_gen_triangle(&(nes->apu.triangle));
+	uint8_t noise_sound = nessys_apu_gen_noise(&(nes->apu.noise));
+	uint8_t dmc_sound = nessys_apu_gen_dmc(nes);
+	float pulse_soundf = (pulse_sound) ?
+		95.88f / ((8128.0f / pulse_sound) + 100.0f) : 0.0f;
+	float other_soundf = (triangle_sound || noise_sound || dmc_sound) ?
+		159.79f / (1.0f / ((triangle_sound / 8227.0f) + (noise_sound / 12241.0f) + (dmc_sound / 22638.0f))) : 0.0f;
+	float soundf = pulse_soundf + other_soundf;
+	int16_t sound = (int16_t)(16384.0f * (soundf - 0.5f));
+	return sound;
+}
+
+void nessys_gen_sound(nessys_t* nes)
+{
+	const float PI = 3.141592654f;
+	const float t_inc = 2.0f * PI * 440 / NESSYS_SND_SAMPLES_PER_SECOND;
+	static float t = 0.0f;
+	static bool playing = false;
+	uint32_t s;
+	uint32_t max_wr_size = NESSYS_SND_BYTES_PER_BUFFER - 20;
+	uint32_t cur_wr_size = (nes->apu.sample_frac_generated >> NESSYS_SND_SAMPLES_FRAC_LOG2) * (NESSYS_SND_BITS_PER_SAMPLE / 8);
+	max_wr_size = (cur_wr_size > max_wr_size) ? 0 : max_wr_size -= cur_wr_size;
+
+	uint32_t end_sample_frac = nes->cycle * NESSYS_SND_SAMPLES_FRAC_PER_CYCLE;
+	uint32_t wr_sample_frac_size = end_sample_frac - nes->apu.sample_frac_generated;
+	uint32_t wr_size = (wr_sample_frac_size >> NESSYS_SND_SAMPLES_FRAC_LOG2) * (NESSYS_SND_BITS_PER_SAMPLE / 8);
+	if (wr_size > max_wr_size) {
+		wr_size = max_wr_size;
+		uint32_t play_pos = nes->sb_main->GetPlayPosition();
+		uint32_t wr_pos = nes->sbuf_frame_start;
+		if (wr_pos < play_pos) wr_pos += NESSYS_SND_BYTES;
+		if (wr_pos - play_pos < 3 * NESSYS_SND_BYTES_PER_BUFFER) wr_size += 40;// else wr_size -= 20;
+	}
+	nes->apu.sample_frac_generated = end_sample_frac;
+
+	if (wr_size) {
+		void* p0;
+		void* p1;
+		uint32_t size0, size1;
+		p0 = nes->sb_main->MapForWrite(nes->sbuf_offset, wr_size, &p1, &size1);
+		if (p0 == NULL) {
+			printf("Could not lock!!!\n");
+			return;
+		}
+		size0 = wr_size - size1;
+		int16_t* buf0 = (int16_t*)p0;
+		int16_t* buf1 = (int16_t*)p1;
+		for (s = 0; s < size0 / 2; s++) {
+			//buf0[s] = (int16_t)(8192.0f * sinf(t));
+			buf0[s] = nessys_gen_sound_sample(nes);
+			t += t_inc;
+		}
+		for (s = 0; s < size1 / 2; s++) {
+			//buf1[s] = (int16_t)(8192.0f * sinf(t));
+			buf1[s] = nessys_gen_sound_sample(nes);
+			t += t_inc;
+		}
+		//uint32_t wr_pos = nes->sb_main->GetWritePosition();
+		//uint32_t end_wr_pos = wr_pos + NESSYS_SND_SAMPLES / 2 - 1;
+		//uint32_t cur_pos = nes->sb_main->GetPlayPosition();
+		//uint32_t wr_pos = (2*NESSYS_SND_SAMPLES / 3) * (((cur_pos / (2*NESSYS_SND_SAMPLES / 3)) + 2) % 3);
+		//// if play position is within the region we want to write, wait until it's out
+		//while (cur_pos >= wr_pos && cur_pos <= end_wr_pos && playing) {
+		//	cur_pos = nes->sb_main->GetPlayPosition();
+		//}
+		//printf("committing buffer play_pos: %f wr_pos: %f time: %d\n", nes->sb_main->GetPlayPosition() / (float) (NESSYS_SND_BYTES_PER_BUFFER), nes->sb_main->GetWritePosition() / (float)(NESSYS_SND_BYTES_PER_BUFFER), nes->timer->k2GetTime());
+		//void* sbuf_ptr = nes->sb_main->k2MapSBufForWrite(wr_pos, 2*NESSYS_SND_SAMPLES / 3);
+		//memcpy(sbuf_ptr, buffer, 2 * NESSYS_SND_SAMPLES / 3);
+		//nes->sb_main->k2UnmapSBuf(sbuf_ptr, wr_pos, 2*NESSYS_SND_SAMPLES / 3);
+
+		nes->sb_main->k2UnmapSBuf(p0, nes->sbuf_offset, wr_size);
+
+		nes->sbuf_offset += wr_size;
+		nes->sbuf_offset = nes->sbuf_offset % NESSYS_SND_BYTES;
+
+		//nes->sb_main->k2UpdateSBuffer(buffer, 2*NESSYS_SND_SAMPLES/4);
+		nes->sb_main->k2PlaySBuffer();
+		playing = true;
+
+		if ((nes->apu.reg[NESSYS_APU_FRAME_COUNTER_OFFSET] & 0xc0) == 0) {
+			// if were 4-step mode, and IRQ disable is 0, then we can produce an interrupt
+			uint32_t frac_until_frame_irq = (0x4 << NESSYS_SND_FRAME_FRAC_LOG2) - nes->apu.frame_frac_counter;
+			uint32_t cycles_until_frame_irq = frac_until_frame_irq / NESSYS_SND_SAMPLES_FRAC_PER_CYCLE;
+			if (nes->frame_irq_cycles == 0 || nes->frame_irq_cycles > cycles_until_frame_irq) nes->frame_irq_cycles = cycles_until_frame_irq;
+		} else {
+			nes->frame_irq_cycles = 0;
+			nes->apu.reg[NESSYS_APU_STATUS_OFFSET] &= ~0x40;
+		}
+		if ((nes->apu.reg[0x10] & 0x80 && nes->apu.dmc.length != 0)) {
+			// generate a dmc interrupt
+			uint32_t cyces_until_dmc_interrupt = ((uint32_t)nes->apu.dmc.bytes_remaining * 8) + nes->apu.dmc.bits_remaining;
+			cyces_until_dmc_interrupt *= nes->apu.dmc.period;
+			if (nes->dmc_irq_cycles == 0 || nes->dmc_irq_cycles > cyces_until_dmc_interrupt) nes->dmc_irq_cycles = cyces_until_dmc_interrupt;
+		} else {
+			nes->dmc_irq_cycles = 0;
+			nes->apu.reg[NESSYS_APU_STATUS_OFFSET] &= ~0x80;
+		}
+	}
+}
+
 void K2CALLBACK nessys_display(void* ptr)
 {
 	nessys_t* nes = (nessys_t*)ptr;
@@ -194,6 +507,9 @@ void K2CALLBACK nessys_display(void* ptr)
 	uint32_t cycles;
 	nesssys_set_scanline(nes, -21);
 	//printf("cycles remaining: %d\n", nes->cycles_remaining);
+	nes->cycle = 0;
+	nes->apu.sample_frac_generated = 0;
+	nes->sbuf_frame_start = nes->sbuf_offset;
 	nes->cycles_remaining = 0;
 	nes->vblank_cycles = (nes->cycles_remaining <= 0) ? 1 : nes->cycles_remaining;
 	cycles = nessys_exec_cpu_cycles(nes, NESSYS_PPU_SCANLINES_VBLANK_CLKS);  // 20 vblank lines
@@ -213,7 +529,7 @@ void K2CALLBACK nessys_display(void* ptr)
 
 	nesssys_set_scanline(nes, 0);
 	nes->ppu.scroll_y = ((nes->ppu.reg[0] & 0x2) << 7) | nes->ppu.scroll[1];
-	nes->ppu.max_y = 240 + 256 * ((nes->ppu.scroll_y & 0xFF) >= 240) + (nes->ppu.scroll_y & 0x100);
+	nes->ppu.max_y = 240 + (nes->ppu.scroll_y & 0x100);// +256 * ((nes->ppu.scroll_y & 0xFF) >= 240);
 	nes->ppu.scroll_y_changed = true;
 	nes->cycles_remaining += NESSYS_PPU_SCANLINES_RENDERED_CLKS + NESSYS_PPU_SCANLINES_POST_RENDER_CLKS; // 241 scanlines
 	int i, c, index;
@@ -328,8 +644,8 @@ void K2CALLBACK nessys_display(void* ptr)
 			uint32_t sprite_y = nes->ppu.oam[0];
 			if (sprite_y < 240) {
 				uint32_t global_x = nes->ppu.scroll[0] + ((nes->ppu.reg[0] & 0x01) << 8) + sprite_x;
-				uint32_t global_y = nes->ppu.scroll[1] + ((nes->ppu.reg[0] & 0x02) << 7) + sprite_y;
-				if (nes->ppu.scroll[1] < 240 && ((global_y & 0xFF) > 240)) global_y += 16;
+				uint32_t global_y = nes->ppu.scroll_y                                    + sprite_y;
+				if (((nes->ppu.scroll_y & 0xFF) < 240) && ((nes->ppu.scroll_y & 0xFF) + sprite_y >= 240)) global_y += 16;
 				uint32_t ntb_addr = ((global_x & 0xF8) >> 3) | ((global_y & 0xF8) << 2) | ((global_x & 0x100) << 2) | ((global_y & 0x100) << 3);
 				uint32_t pat_addr = (*nessys_ppu_mem(nes, NESSYS_CHR_NTB_WIN_MIN + ntb_addr) << 4) | ((nes->ppu.reg[0] & 0x10) << 8);
 				//printf("gx/y: 0x%x 0x%x ntb_addr: 0x%x pat_addr: 0x%x ", global_x, global_y, ntb_addr, pat_addr);
@@ -341,8 +657,8 @@ void K2CALLBACK nessys_display(void* ptr)
 				pat_addr = (*nessys_ppu_mem(nes, NESSYS_CHR_NTB_WIN_MIN + ntb_addr) << 4) | ((nes->ppu.reg[0] & 0x10) << 8);
 				bg_pattern[1] = *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr));
 				bg_pattern[1] |= *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr + 8));
+				if (((global_y & 0xFF) < 240) && ((global_y & 0xFF) + 8) >= 240) global_y += 16;
 				global_y += 8;
-				if (nes->ppu.scroll[1] < 240 && ((global_y & 0xFF) > 240)) global_y += 16;
 				ntb_addr = ((global_x & 0xF8) >> 3) | ((global_y & 0xF8) << 2) | ((global_x & 0x100) << 2) | ((global_y & 0x100) << 3);
 				pat_addr = (*nessys_ppu_mem(nes, NESSYS_CHR_NTB_WIN_MIN + ntb_addr) << 4) | ((nes->ppu.reg[0] & 0x10) << 8);
 				bg_pattern[3] = *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr));
@@ -352,8 +668,8 @@ void K2CALLBACK nessys_display(void* ptr)
 				pat_addr = (*nessys_ppu_mem(nes, NESSYS_CHR_NTB_WIN_MIN + ntb_addr) << 4) | ((nes->ppu.reg[0] & 0x10) << 8);
 				bg_pattern[2] = *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr));
 				bg_pattern[2] |= *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr + 8));
+				if (((global_y & 0xFF) < 240) && ((global_y & 0xFF) + 8) >= 240) global_y += 16;
 				global_y += 8;
-				if (nes->ppu.scroll[1] < 240 && ((global_y & 0xFF) > 240)) global_y += 16;
 				ntb_addr = ((global_x & 0xF8) >> 3) | ((global_y & 0xF8) << 2) | ((global_x & 0x100) << 2) | ((global_y & 0x100) << 3);
 				pat_addr = (*nessys_ppu_mem(nes, NESSYS_CHR_NTB_WIN_MIN + ntb_addr) << 4) | ((nes->ppu.reg[0] & 0x10) << 8);
 				bg_pattern[4] = *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr));
@@ -373,7 +689,7 @@ void K2CALLBACK nessys_display(void* ptr)
 				sp_pattern[1] = *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + sp_addr));
 				sp_pattern[1] |= *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + sp_addr + 8));
 				uint32_t local_x = global_x & 0x7;
-				uint32_t local_y = global_x & 0x7;
+				uint32_t local_y = global_y & 0x7;
 				uint64_t x_mask = (0xFF << local_x) & 0xFF;
 				x_mask |= (x_mask << 8);
 				x_mask |= (x_mask << 16);
@@ -419,10 +735,10 @@ void K2CALLBACK nessys_display(void* ptr)
 				x_mask = 0xFF;
 				if (((nes->ppu.reg[1] & 0x06) != 0x06) && sprite_x < 8) {
 					// if either background or tile clipping is enabled, don't test pixels coordinates below 8
-					x_mask <<= 8 - sprite_x;
-				}
-				else if (sprite_x > 247) {
-					x_mask >>= sprite_x - 247;
+					x_mask >>= 8 - sprite_x;
+				} else if (sprite_x > 247) {
+					x_mask <<= sprite_x - 247;
+					x_mask &= 0xFF;
 				}
 				x_mask |= (x_mask << 8);
 				x_mask |= (x_mask << 16);
@@ -484,7 +800,9 @@ void K2CALLBACK nessys_display(void* ptr)
 		//printf("executed %d cycles; cycles remaining %d\n", cycles, nes->cycles_remaining);
 	} while (nes->cycles_remaining > 100);
 
+	nessys_gen_sound(nes);
 	nes->win->k2SwapBuffer();
+	//printf("end frame: %d\n", nes->timer->k2GetTime());
 
 }
 
@@ -606,13 +924,15 @@ void nessys_default_memmap(nessys_t* nes)
 			nes->prg_rom_bank_mask[b] = 0x0;
 		}
 	}
-	if (nes->ppu.chr_rom_base) {
+	if (nes->ppu.chr_rom_base || nes->ppu.chr_ram_base) {
 		mem_offset = 0;
+		uint8_t* base = (nes->ppu.chr_rom_base) ? nes->ppu.chr_rom_base : nes->ppu.chr_ram_base;
+		uint32_t size = (nes->ppu.chr_rom_base) ? nes->ppu.chr_rom_size : nes->ppu.chr_ram_size;
 		for (b = 0; b <= NESSYS_CHR_ROM_END_BANK; b++) {
-			nes->ppu.chr_rom_bank[b] = nes->ppu.chr_rom_base + mem_offset;
+			nes->ppu.chr_rom_bank[b] = base + mem_offset;
 			nes->ppu.chr_rom_bank_mask[b] = NESSYS_CHR_MEM_MASK;
 			mem_offset += NESSYS_CHR_BANK_SIZE;
-			if (mem_offset >= nes->ppu.chr_rom_size) mem_offset -= nes->ppu.chr_rom_size;
+			if (mem_offset >= size) mem_offset -= size;
 		}
 	} else {
 		for (b = 0; b <= NESSYS_CHR_ROM_END_BANK; b++) {
@@ -768,7 +1088,13 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 			nes->ppu.reg[2] |= 0x40;
 			nes->sprite0_hit_cycles = 0;
 		}
-		if (nes->cycles_remaining < ((int32_t) (NESSYS_PPU_PER_CPU_CLK*(op->num_cycles + penalty_cycles))) || vblank_interrupt) {
+
+		uint32_t instruction_cycles = (NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles));
+		bool mapper_irq = (nes->mapper_irq_cycles > 0 && nes->mapper_irq_cycles < instruction_cycles);
+		bool frame_irq = (nes->frame_irq_cycles > 0 && nes->frame_irq_cycles < instruction_cycles);
+		bool dmc_irq = (nes->dmc_irq_cycles > 0 && nes->dmc_irq_cycles < instruction_cycles);
+		bool irq_interrupt = mapper_irq;// || frame_irq || dmc_irq;
+		if (nes->cycles_remaining < (int32_t)instruction_cycles || vblank_interrupt) {
 			done = !vblank_interrupt;
 			if (vblank_interrupt) {
 				// get the stack base
@@ -787,9 +1113,9 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				cycle_count += NESSYS_PPU_PER_CPU_CLK * (7);
 				// cycles remaining may go negative if we don't have enough to cover the NMI
 				nes->cycles_remaining -= NESSYS_PPU_PER_CPU_CLK * (7);
-				nes->cycle += 7;
+				nes->cycle += NESSYS_PPU_PER_CPU_CLK * (7);
 			}
-		} else if( !(nes->reg.p & C6502_P_I) && nes->mapper_irq_cycles > 0 && nes->mapper_irq_cycles < ((int32_t)(NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles))) ) {
+		} else if( !(nes->reg.p & C6502_P_I) && irq_interrupt) {
 			// mapper interrupt
 			// get the stack base
 			operand = nessys_mem(nes, 0x100, &bank, &offset);
@@ -798,12 +1124,21 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 			*(operand + nes->reg.s) = nes->reg.p & ~C6502_P_B; nes->reg.s--;
 			nes->reg.pc = *((uint16_t*)nessys_mem(nes, NESSYS_IRQ_VECTOR, &bank, &offset));
 			nes->reg.p |= C6502_P_I;
+			if (mapper_irq) nes->mapper_irq_cycles = 1;
+			if (frame_irq) {
+				nes->frame_irq_cycles = 1;
+				nes->apu.reg[NESSYS_APU_STATUS_OFFSET] |= 0x40;
+			}
+			if (dmc_irq) {
+				nes->dmc_irq_cycles = 1;
+				nes->apu.reg[NESSYS_APU_STATUS_OFFSET] |= 0x80;
+			}
 
 			//printf("-----------------------------------> Mapper interrupt scanline: %d\n", nes->scanline);
 			cycle_count += NESSYS_PPU_PER_CPU_CLK * (7);
 			// cycles remaining may go negative if we don't have enough to cover the NMI
 			nes->cycles_remaining -= NESSYS_PPU_PER_CPU_CLK * (7);
-			nes->cycle += 7;
+			nes->cycle += NESSYS_PPU_PER_CPU_CLK* (7);
 		} else {
 			skip_print = 1;
 			if (skip_print == 0) {
@@ -843,11 +1178,18 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					if ((nes->apu.joy_control & 0x1) == 0x0) {
 						nes->apu.latched_joypad[j] >>= 1;
 					}
+				} else if (offset == NESSYS_APU_STATUS_OFFSET) {
+					nes->apu.reg[NESSYS_APU_STATUS_OFFSET] &= 0xc0;
+					nes->apu.reg[NESSYS_APU_STATUS_OFFSET] |= (nes->apu.pulse[0].length) ? 0x1 : 0x0;
+					nes->apu.reg[NESSYS_APU_STATUS_OFFSET] |= (nes->apu.pulse[1].length) ? 0x2 : 0x0;
+					nes->apu.reg[NESSYS_APU_STATUS_OFFSET] |= (nes->apu.triangle.length) ? 0x4 : 0x0;
+					nes->apu.reg[NESSYS_APU_STATUS_OFFSET] |= (nes->apu.noise.length)    ? 0x8 : 0x0;
+					nes->apu.reg[NESSYS_APU_STATUS_OFFSET] |= (nes->apu.dmc.bytes_remaining) ? 0x10 : 0x0;
 				}
 				break;
 			}
 
-			if (nes->reg.s == 0xfe) printf("------------------> stack about to overflow: 0x%x!!!\n", nes->reg.s);;
+			//if (nes->reg.s == 0xfe) printf("------------------> stack about to overflow: 0x%x!!!\n", nes->reg.s);;
 			// perform the instruction's operation
 			switch (op->ins) {
 			case C6502_INS_ADC:
@@ -888,8 +1230,11 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				if (bank < NESSYS_PRG_ROM_START_BANK) {
 					ppu_write = (bank == NESSYS_PPU_REG_START_BANK) || (bank == NESSYS_APU_REG_START_BANK && offset == 0x14);
 					apu_write = (bank == NESSYS_APU_REG_START_BANK);
-					if (apu_write && offset >= NESSYS_APU_JOYPAD0_OFFSET) {
+					if (apu_write && offset >= NESSYS_APU_STATUS_OFFSET) {
 						switch (offset) {
+						case NESSYS_APU_STATUS_OFFSET:
+							nes->apu.status = (uint8_t)result;
+							break;
 						case NESSYS_APU_JOYPAD0_OFFSET:
 							nes->apu.joy_control = (uint8_t)result;
 							break;
@@ -1059,8 +1404,11 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				if (bank < NESSYS_PRG_ROM_START_BANK) {
 					ppu_write = (bank == NESSYS_PPU_REG_START_BANK) || (bank == NESSYS_APU_REG_START_BANK && offset == 0x14);
 					apu_write = (bank == NESSYS_APU_REG_START_BANK);
-					if (apu_write && offset >= NESSYS_APU_JOYPAD0_OFFSET) {
+					if (apu_write && offset >= NESSYS_APU_STATUS_OFFSET) {
 						switch (offset) {
+						case NESSYS_APU_STATUS_OFFSET:
+							nes->apu.status = (uint8_t)result;
+							break;
 						case NESSYS_APU_JOYPAD0_OFFSET:
 							nes->apu.joy_control = (uint8_t)result;
 							break;
@@ -1110,8 +1458,11 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				if (bank < NESSYS_PRG_ROM_START_BANK) {
 					ppu_write = (bank == NESSYS_PPU_REG_START_BANK) || (bank == NESSYS_APU_REG_START_BANK && offset == 0x14);
 					apu_write = (bank == NESSYS_APU_REG_START_BANK);
-					if (apu_write && offset >= NESSYS_APU_JOYPAD0_OFFSET) {
+					if (apu_write && offset >= NESSYS_APU_STATUS_OFFSET) {
 						switch (offset) {
+						case NESSYS_APU_STATUS_OFFSET:
+							nes->apu.status = (uint8_t)result;
+							break;
 						case NESSYS_APU_JOYPAD0_OFFSET:
 							nes->apu.joy_control = (uint8_t)result;
 							break;
@@ -1192,8 +1543,11 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				if (bank < NESSYS_PRG_ROM_START_BANK) {
 					ppu_write = (bank == NESSYS_PPU_REG_START_BANK) || (bank == NESSYS_APU_REG_START_BANK && offset == 0x14);
 					apu_write = (bank == NESSYS_APU_REG_START_BANK);
-					if (apu_write && offset >= NESSYS_APU_JOYPAD0_OFFSET) {
+					if (apu_write && offset >= NESSYS_APU_STATUS_OFFSET) {
 						switch (offset) {
+						case NESSYS_APU_STATUS_OFFSET:
+							nes->apu.status = (uint8_t)result;
+							break;
 						case NESSYS_APU_JOYPAD0_OFFSET:
 							nes->apu.joy_control = (uint8_t)result;
 							break;
@@ -1253,8 +1607,11 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				if (bank < NESSYS_PRG_ROM_START_BANK) {
 					ppu_write = (bank == NESSYS_PPU_REG_START_BANK) || (bank == NESSYS_APU_REG_START_BANK && offset == 0x14);
 					apu_write = (bank == NESSYS_APU_REG_START_BANK);
-					if (apu_write && offset >= NESSYS_APU_JOYPAD0_OFFSET) {
+					if (apu_write && offset >= NESSYS_APU_STATUS_OFFSET) {
 						switch (offset) {
+						case NESSYS_APU_STATUS_OFFSET:
+							nes->apu.status = (uint8_t)result;
+							break;
 						case NESSYS_APU_JOYPAD0_OFFSET:
 							nes->apu.joy_control = (uint8_t)result;
 							break;
@@ -1281,8 +1638,11 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				if (bank < NESSYS_PRG_ROM_START_BANK) {
 					ppu_write = (bank == NESSYS_PPU_REG_START_BANK) || (bank == NESSYS_APU_REG_START_BANK && offset == 0x14);
 					apu_write = (bank == NESSYS_APU_REG_START_BANK);
-					if (apu_write && offset >= NESSYS_APU_JOYPAD0_OFFSET) {
+					if (apu_write && offset >= NESSYS_APU_STATUS_OFFSET) {
 						switch (offset) {
+						case NESSYS_APU_STATUS_OFFSET:
+							nes->apu.status = (uint8_t)result;
+							break;
 						case NESSYS_APU_JOYPAD0_OFFSET:
 							nes->apu.joy_control = (uint8_t)result;
 							break;
@@ -1346,8 +1706,14 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				if (bank < NESSYS_PRG_ROM_START_BANK) {
 					ppu_write = (bank == NESSYS_PPU_REG_START_BANK) || (bank == NESSYS_APU_REG_START_BANK && offset == 0x14);
 					apu_write = (bank == NESSYS_APU_REG_START_BANK);
-					if (apu_write && offset >= NESSYS_APU_JOYPAD0_OFFSET) {
+					if (apu_write && offset >= NESSYS_APU_STATUS_OFFSET) {
 						switch (offset) {
+						case NESSYS_APU_STATUS_OFFSET:
+							//if ((nes->apu.status & 0x10) != (nes->reg.a & 0x10)) {
+							//	printf("changing dmc dmc\n");
+							//}
+							nes->apu.status = nes->reg.a;
+							break;
 						case NESSYS_APU_JOYPAD0_OFFSET:
 							nes->apu.joy_control = nes->reg.a;
 							break;
@@ -1369,8 +1735,11 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				if (bank < NESSYS_PRG_ROM_START_BANK) {
 					ppu_write = (bank == NESSYS_PPU_REG_START_BANK) || (bank == NESSYS_APU_REG_START_BANK && offset == 0x14);
 					apu_write = (bank == NESSYS_APU_REG_START_BANK);
-					if (apu_write && offset >= NESSYS_APU_JOYPAD0_OFFSET) {
+					if (apu_write && offset >= NESSYS_APU_STATUS_OFFSET) {
 						switch (offset) {
+						case NESSYS_APU_STATUS_OFFSET:
+							nes->apu.status = nes->reg.x;
+							break;
 						case NESSYS_APU_JOYPAD0_OFFSET:
 							nes->apu.joy_control = nes->reg.x;
 							break;
@@ -1394,6 +1763,9 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					apu_write = (bank == NESSYS_APU_REG_START_BANK);
 					if (apu_write && offset >= NESSYS_APU_JOYPAD0_OFFSET) {
 						switch (offset) {
+						case NESSYS_APU_STATUS_OFFSET:
+							nes->apu.status = nes->reg.y;
+							break;
 						case NESSYS_APU_JOYPAD0_OFFSET:
 							nes->apu.joy_control = nes->reg.y;
 							break;
@@ -1479,9 +1851,146 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 			}
 
 			if (apu_write) {
-				if (offset == NESSYS_APU_JOYPAD0_OFFSET && (nes->apu.joy_control & 0x1)) {
-					nes->apu.latched_joypad[0] = nes->apu.joypad[0];
-					nes->apu.latched_joypad[1] = nes->apu.joypad[1];
+				if (offset != NESSYS_APU_JOYPAD0_OFFSET) {
+					nessys_gen_sound(nes);
+				}
+				uint8_t pulse_sel = (offset >> 2) & 0x1;
+				switch (offset) {
+				case 0x0:
+				case 0x4:
+					nes->apu.pulse[pulse_sel].env.volume = nes->apu.reg[offset] & 0xf;// (nes->apu.reg[NESSYS_APU_STATUS_OFFSET] & (1 << pulse_sel)) ? nes->apu.reg[offset] & 0xf : 0;
+					nes->apu.pulse[pulse_sel].env.flags &= ~(NESSYS_APU_PULSE_FLAG_HALT_LENGTH | NESSYS_APU_PULSE_FLAG_CONST_VOLUME);
+					nes->apu.pulse[pulse_sel].env.flags |= nes->apu.reg[offset] & (NESSYS_APU_PULSE_FLAG_HALT_LENGTH | NESSYS_APU_PULSE_FLAG_CONST_VOLUME);
+					nes->apu.pulse[pulse_sel].duty = NESSYS_APU_PULSE_DUTY_TABLE[(nes->apu.reg[offset] >> 6) & 0x3];
+					break;
+				case 0x1:
+				case 0x5:
+					nes->apu.pulse[pulse_sel].sweep_shift = nes->apu.reg[offset] & 0x7;
+					nes->apu.pulse[pulse_sel].sweep_period = (nes->apu.reg[offset] >> 4) & 0x7;
+					nes->apu.pulse[pulse_sel].env.flags &= ~(NESSYS_APU_PULSE_FLAG_SWEEP_EN | NESSYS_APU_PULSE_FLAG_SWEEP_NEGATE);
+					nes->apu.pulse[pulse_sel].env.flags|= nes->apu.reg[offset] & (NESSYS_APU_PULSE_FLAG_SWEEP_EN | NESSYS_APU_PULSE_FLAG_SWEEP_NEGATE);
+					nes->apu.pulse[pulse_sel].env.flags |= NESSYS_APU_PULSE_FLAG_SWEEP_RELOAD;
+					break;
+				case 0x2:
+				case 0x6:
+					nes->apu.pulse[pulse_sel].period &= 0xFF00;
+					nes->apu.pulse[pulse_sel].period |= nes->apu.reg[offset];
+					nes->apu.pulse[pulse_sel].sweep_orig_period = nes->apu.pulse[pulse_sel].period;
+					break;
+				case 0x3:
+				case 0x7:
+					nes->apu.pulse[pulse_sel].period &= 0x00FF;
+					nes->apu.pulse[pulse_sel].period |= ((uint16_t)nes->apu.reg[offset] << 8) & 0x700;
+					nes->apu.pulse[pulse_sel].sweep_orig_period = nes->apu.pulse[pulse_sel].period;
+					if (nes->apu.status & (1 << pulse_sel)) {
+						nes->apu.pulse[pulse_sel].length = NESSYS_APU_PULSE_LENGTH_TABLE[(nes->apu.reg[offset] >> 3) & 0x1f];
+					} else {
+						nes->apu.pulse[pulse_sel].length = 0;
+					}
+					nes->apu.pulse[pulse_sel].duty_phase = 0;
+					nes->apu.pulse[pulse_sel].cur_time_frac = 0;
+					nes->apu.pulse[pulse_sel].env.flags |= NESSYS_APU_PULSE_FLAG_ENV_START;
+					break;
+				case 0x8:
+					nes->apu.triangle.reload = nes->apu.reg[0x8] & 0x7f;
+					nes->apu.triangle.flags &= ~(NESSYS_APU_TRIANGLE_FLAG_CONTROL);
+					nes->apu.triangle.flags |= nes->apu.reg[0x8] & NESSYS_APU_TRIANGLE_FLAG_CONTROL;
+					break;
+				case 0xa:
+					nes->apu.triangle.period &= 0xFF00;
+					nes->apu.triangle.period |= nes->apu.reg[0xa];
+					break;
+				case 0xb:
+					nes->apu.triangle.period &= 0x00FF;
+					nes->apu.triangle.period |= ((uint16_t)nes->apu.reg[0xb] << 8) & 0x700;
+					if (nes->apu.status & 0x4) {
+						nes->apu.triangle.length = NESSYS_APU_PULSE_LENGTH_TABLE[(nes->apu.reg[0xb] >> 3) & 0x1f];
+					} else {
+						nes->apu.triangle.length = 0;
+					}
+					nes->apu.triangle.sequence = 0x10;
+					nes->apu.triangle.flags |= NESSYS_APU_TRIANGLE_FLAG_RELOAD;
+					break;
+				case 0xc:
+					nes->apu.noise.env.volume = nes->apu.reg[0xc] & 0xf;// (nes->apu.reg[NESSYS_APU_STATUS_OFFSET] & 0x4) ? nes->apu.reg[0xc] & 0xf : 0;
+					nes->apu.noise.env.flags &= ~(NESSYS_APU_PULSE_FLAG_HALT_LENGTH | NESSYS_APU_PULSE_FLAG_CONST_VOLUME);
+					nes->apu.noise.env.flags |= nes->apu.reg[0xc] & (NESSYS_APU_PULSE_FLAG_HALT_LENGTH | NESSYS_APU_PULSE_FLAG_CONST_VOLUME);
+					break;
+				case 0xe:
+					nes->apu.noise.env.flags &= ~(NESSYS_APU_NOISE_FLAG_MODE);
+					nes->apu.noise.env.flags |= nes->apu.reg[0xe] & NESSYS_APU_NOISE_FLAG_MODE;
+					nes->apu.noise.period = NESSYS_APU_NOISE_PERIOD_TABLE[nes->apu.reg[0xe] & 0xf];
+					break;
+				case 0xf:
+					if (nes->apu.status & 0x8) {
+						nes->apu.noise.length = NESSYS_APU_PULSE_LENGTH_TABLE[(nes->apu.reg[0xf] >> 3) & 0x1f];
+					} else {
+						nes->apu.noise.length = 0;
+					}
+					nes->apu.noise.env.flags |= NESSYS_APU_PULSE_FLAG_ENV_START;
+					break;
+				case 0x10:
+					nes->apu.dmc.flags &= ~(NESSYS_APU_DMC_FLAG_IRQ_ENABLE | NESSYS_APU_DMC_FLAG_LOOP);
+					nes->apu.dmc.flags |= nes->apu.reg[0x10] & (NESSYS_APU_DMC_FLAG_IRQ_ENABLE | NESSYS_APU_DMC_FLAG_LOOP);
+					nes->apu.dmc.period = NESSYS_APU_DMC_PERIOD_TABLE[nes->apu.reg[0x10] & 0xf];
+					break;
+				case 0x11:
+					nes->apu.dmc.output = nes->apu.reg[0x11] & 0x7f;
+					break;
+				case 0x12:
+					nes->apu.dmc.start_addr = 0xc000 + (((uint16_t)nes->apu.reg[0x12]) << 6);
+					break;
+				case 0x13:
+					nes->apu.dmc.length = (((uint16_t)nes->apu.reg[0x13]) << 4) + 1;
+					if ((nes->apu.reg[0x13] & 0x80) == 0) {
+						nes->dmc_irq_cycles = 0;
+						nes->apu.reg[NESSYS_APU_STATUS_OFFSET] &= ~0x80;
+					}
+					break;
+				case NESSYS_APU_STATUS_OFFSET:
+					if (!(nes->apu.status & 0x1)) {
+						nes->apu.pulse[0].length = 0;
+					}
+					if (!(nes->apu.status & 0x2)) {
+						nes->apu.pulse[1].length = 0;
+					}
+					if (!(nes->apu.status & 0x4)) {
+						nes->apu.triangle.length = 0;
+					}
+					if (!(nes->apu.status & 0x8)) {
+						nes->apu.noise.length = 0;
+					}
+					if (!(nes->apu.status & 0x10)) {
+						nes->apu.dmc.bytes_remaining = 0;
+						nes->apu.dmc.flags &= ~NESSYS_APU_DMC_FLAG_DMA_ENABLE;
+					} else {
+						if (nes->apu.dmc.bytes_remaining == 0) {
+							nes->apu.dmc.cur_addr = nes->apu.dmc.start_addr;
+							nes->apu.dmc.bytes_remaining = nes->apu.dmc.length;
+						}
+						nes->apu.dmc.flags |= NESSYS_APU_DMC_FLAG_DMA_ENABLE;
+					}
+					break;
+				case NESSYS_APU_JOYPAD0_OFFSET:
+					if (nes->apu.joy_control & 0x1) {
+						nes->apu.latched_joypad[0] = nes->apu.joypad[0];
+						nes->apu.latched_joypad[1] = nes->apu.joypad[1];
+					}
+					break;
+				case NESSYS_APU_FRAME_COUNTER_OFFSET:
+					//nes->apu.frame_frac_counter = 1 << NESSYS_SND_FRAME_FRAC_LOG2;
+					nes->apu.frame_frac_counter &= ~NESSYS_SND_FRAME_FRAC_MASK;
+					nes->apu.frame_frac_counter |= (nes->apu.frame_counter & 0x80) ? NESSYS_SND_FRAME_FRAC_MASK : 0;
+					break;
+				}
+			} else {
+				switch(offset) {
+				case NESSYS_APU_STATUS_OFFSET:
+					if (nes->frame_irq_cycles == 1) {
+						nes->frame_irq_cycles = 0;
+						nes->apu.reg[NESSYS_APU_STATUS_OFFSET] &= ~0x40;
+					}
+					break;
 				}
 			}
 			if (ppu_write) {
@@ -1491,24 +2000,24 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					nes->ppu.reg[2] = (nes->ppu.status & 0xE0) | (nes->ppu.reg[offset & 0x7] & 0x1F);
 				}
 				switch (offset) {
-				case 0:
+				case 0x0:
 					// we only re-render frame if bits that change rendering changes
 					ppu_ever_written = ppu_ever_written || (data_change & 0x39);
 					break;
-				case 1:
+				case 0x1:
 					// we only re-render the frame if the register actually changed value
 					ppu_ever_written = ppu_ever_written || data_change;
 					break;
-				case 3:
+				case 0x3:
 					// writing this reg during rendering may have odd effects...not implemented, but re-render anyway
 					ppu_ever_written = true;
 					break;
-				case 4:
+				case 0x4:
 					ppu_ever_written = true;
 					nes->ppu.oam[nes->ppu.reg[3]] = nes->ppu.reg[4];
 					nes->ppu.reg[3]++;
 					break;
-				case 5:
+				case 0x5:
 					// only update if the scroll value actually changed, and only in x direction (y updates at next frame)
 					ppu_ever_written = ppu_ever_written || ((nes->ppu.addr_toggle == 0) && (nes->ppu.scroll[0] != nes->ppu.reg[5]));
 					nes->ppu.scroll[nes->ppu.addr_toggle] = nes->ppu.reg[5];
@@ -1525,7 +2034,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					}
 					nes->ppu.addr_toggle = !nes->ppu.addr_toggle;
 					break;
-				case 6:
+				case 0x6:
 					ppu_ever_written = true;  // any access to this register during rendering can effect rendering
 					//printf("writing ppu addr: 0x%x\n", nes->ppu.mem_addr);
 					mem_addr_mask = 0xFF00 >> 8 * (nes->ppu.addr_toggle);
@@ -1549,13 +2058,13 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					if (nes->ppu.addr_toggle) {
 						nes->ppu.mem_addr = nes->ppu.t_mem_addr;
 						nes->ppu.scroll_y = ((nes->ppu.reg[0] & 0x2) << 7) | nes->ppu.scroll[1];
-						nes->ppu.max_y = 240 + 256 * ((nes->ppu.scroll_y & 0xFF) >= 240) + (nes->ppu.scroll_y & 0x100);
+						nes->ppu.max_y = 240 + (nes->ppu.scroll_y & 0x100);// +256 * ((nes->ppu.scroll_y & 0xFF) >= 240);
 						nes->ppu.scroll_y_changed = true;
 					}
 					//printf("to addr= 0x%x scroll: %d %d %d\n", nes->ppu.mem_addr, nes->ppu.scroll[0], nes->ppu.scroll[1], nes->ppu.scroll_y);
 					nes->ppu.addr_toggle = !nes->ppu.addr_toggle;
 					break;
-				case 7:
+				case 0x7:
 					ppu_ever_written = true;
 					if (skip_print == 0) printf("write to vram addr 0x%x data 0x%x", nes->ppu.mem_addr, nes->ppu.reg[7]);
 					*nessys_ppu_mem(nes, nes->ppu.mem_addr) = nes->ppu.reg[7];
@@ -1588,7 +2097,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 			// cycles remaining may go negative if we have a oam dma transfer
 			// the cycle penalty is accounted for until after th decision has already been bade to execute it
 			nes->cycles_remaining -= NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles);
-			nes->cycle += op->num_cycles + penalty_cycles;
+			nes->cycle += NESSYS_PPU_PER_CPU_CLK*(op->num_cycles + penalty_cycles);
 			nes->scanline_cycle += NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles);
 			if ((nes->ppu.reg[1] & 0x18) && (nes->scanline >= 0)) {
 				uint32_t a12_toggle_cycle;
@@ -1603,7 +2112,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					a12_toggle_cycle = 1000;// that is, never
 					break;
 				}
-				if (nes->scanline_cycle < a12_toggle_cycle) {
+				if (nes->scanline_cycle < (int32_t) a12_toggle_cycle) {
 					nes->ppu.mem_addr &= ~0x1000;
 				} else {
 					//if((nes->ppu.mem_addr & 0x1000) == 0) printf("a12_toggled: %d\n", nes->scanline_cycle);
@@ -1642,6 +2151,20 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					nes->mapper_irq_cycles = 1;
 				} else {
 					nes->mapper_irq_cycles -= NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles);
+				}
+			}
+			if (nes->frame_irq_cycles > 0) {
+				if (nes->frame_irq_cycles <= NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles)) {
+					nes->frame_irq_cycles = 1;
+				} else {
+					nes->frame_irq_cycles -= NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles);
+				}
+			}
+			if (nes->dmc_irq_cycles > 0) {
+				if (nes->dmc_irq_cycles <= NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles)) {
+					nes->dmc_irq_cycles = 1;
+				} else {
+					nes->dmc_irq_cycles -= NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles);
 				}
 			}
 		}

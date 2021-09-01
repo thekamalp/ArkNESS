@@ -16,29 +16,198 @@ bool mapper_update_null(nessys_t* nes)
 	return false;
 }
 
+// mapper 1 functions
+void mapper1_update_name_tbl_map(nessys_t* nes)
+{
+	mapper1_data* m1_data = (mapper1_data*)nes->mapper_data;
+	nes->ppu.name_tbl_vert_mirror = (m1_data->control & 0x3) == 2;
+	switch (m1_data->control & 0x3) {
+	case 0:
+		// one screen, lower bank
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 0] = nes->ppu.mem;
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 1] = nes->ppu.mem;
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 2] = nes->ppu.mem;
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 3] = nes->ppu.mem;
+		break;
+	case 1:
+		// one screen, upper bank
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 0] = nes->ppu.mem + 0x400;
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 1] = nes->ppu.mem + 0x400;
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 2] = nes->ppu.mem + 0x400;
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 3] = nes->ppu.mem + 0x400;
+		break;
+	case 2:
+		// vertical mirror
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 0] = nes->ppu.mem;
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 1] = nes->ppu.mem + 0x400;
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 2] = nes->ppu.mem;
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 3] = nes->ppu.mem + 0x400;
+		break;
+	case 3:
+		// horizontal mirror
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 0] = nes->ppu.mem;
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 1] = nes->ppu.mem;
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 2] = nes->ppu.mem + 0x400;
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 3] = nes->ppu.mem + 0x400;
+		break;
+	}
+	uint8_t b;
+	for (b = NESSYS_CHR_NTB_START_BANK + 4; b <= NESSYS_CHR_NTB_END_BANK; b++) {
+		nes->ppu.chr_rom_bank[b] = nes->ppu.chr_rom_bank[b - 4];
+	}
+}
+
+void mapper1_update_prg_map(nessys_t* nes)
+{
+	mapper1_data* m1_data = (mapper1_data*)nes->mapper_data;
+	uint32_t offset;
+	uint8_t b;
+	const uint8_t HALF_BANK = NESSYS_PRG_ROM_START_BANK + (NESSYS_PRG_NUM_BANKS - NESSYS_PRG_ROM_START_BANK) / 2;
+	switch (m1_data->control & 0x0c) {
+	case 0x0:
+	case 0x4:
+		// single 32KB bank
+		offset = (m1_data->prg_bank & 0xe) << 14;
+		for(b = NESSYS_PRG_ROM_START_BANK; b < NESSYS_PRG_NUM_BANKS; b++) {
+			nes->prg_rom_bank[b] = nes->prg_rom_base + offset;
+			nes->prg_rom_bank_mask[b] = NESSYS_PRG_MEM_MASK;
+			offset += NESSYS_PRG_BANK_SIZE;
+		}
+		break;
+	case 0x8:
+		// first 16KB of addr space fixed to first 16KB in cart
+		// second 16KB programmable
+		offset = 0x0;
+		for (b = NESSYS_PRG_ROM_START_BANK; b < HALF_BANK; b++) {
+			nes->prg_rom_bank[b] = nes->prg_rom_base + offset;
+			nes->prg_rom_bank_mask[b] = NESSYS_PRG_MEM_MASK;
+			offset += NESSYS_PRG_BANK_SIZE;
+		}
+		offset = (m1_data->prg_bank & 0xf) << 14;
+		for (b = HALF_BANK; b < NESSYS_PRG_NUM_BANKS; b++) {
+			nes->prg_rom_bank[b] = nes->prg_rom_base + offset;
+			nes->prg_rom_bank_mask[b] = NESSYS_PRG_MEM_MASK;
+			offset += NESSYS_PRG_BANK_SIZE;
+		}
+		break;
+	case 0xc:
+		// first 16KB programmable
+		// second 16KB of addr space fixed to last 16KB in cart
+		offset = (m1_data->prg_bank & 0xf) << 14;
+		for (b = NESSYS_PRG_ROM_START_BANK; b < HALF_BANK; b++) {
+			nes->prg_rom_bank[b] = nes->prg_rom_base + offset;
+			nes->prg_rom_bank_mask[b] = NESSYS_PRG_MEM_MASK;
+			offset += NESSYS_PRG_BANK_SIZE;
+		}
+		offset = nes->prg_rom_size - 0x4000;
+		for (b = HALF_BANK; b < NESSYS_PRG_NUM_BANKS; b++) {
+			nes->prg_rom_bank[b] = nes->prg_rom_base + offset;
+			nes->prg_rom_bank_mask[b] = NESSYS_PRG_MEM_MASK;
+			offset += NESSYS_PRG_BANK_SIZE;
+		}
+		break;
+	}
+}
+
+void mapper1_update_chr_map(nessys_t* nes)
+{
+	mapper1_data* m1_data = (mapper1_data*)nes->mapper_data;
+	uint32_t offset;
+	uint8_t b;
+	const uint8_t HALF_BANK = NESSYS_CHR_ROM_START_BANK + (NESSYS_CHR_ROM_END_BANK + 1 - NESSYS_CHR_ROM_START_BANK) / 2;
+	uint8_t* base = (nes->ppu.chr_rom_base) ? nes->ppu.chr_rom_base : nes->ppu.chr_ram_base;
+	switch (m1_data->control & 0x10) {
+	case 0x00:
+		// switch 8KB at a time
+		offset = (m1_data->chr_bank0 & 0x1e) << 12;
+		for (b = NESSYS_CHR_ROM_START_BANK; b <= NESSYS_CHR_ROM_END_BANK; b++) {
+			nes->ppu.chr_rom_bank[b] = base + offset;
+			nes->ppu.chr_rom_bank_mask[b] = NESSYS_CHR_MEM_MASK;
+			offset += NESSYS_CHR_BANK_SIZE;
+		}
+		break;
+	case 0x10:
+		// switch 2 independent 4KB at a time
+		offset = (m1_data->chr_bank0 & 0x1f) << 12;
+		for (b = NESSYS_CHR_ROM_START_BANK; b < HALF_BANK; b++) {
+			nes->ppu.chr_rom_bank[b] = base + offset;
+			nes->ppu.chr_rom_bank_mask[b] = NESSYS_CHR_MEM_MASK;
+			offset += NESSYS_CHR_BANK_SIZE;
+		}
+		offset = (m1_data->chr_bank1 & 0x1f) << 12;
+		for (b = HALF_BANK; b <= NESSYS_CHR_ROM_END_BANK; b++) {
+			nes->ppu.chr_rom_bank[b] = base + offset;
+			nes->ppu.chr_rom_bank_mask[b] = NESSYS_CHR_MEM_MASK;
+			offset += NESSYS_CHR_BANK_SIZE;
+		}
+		break;
+	}
+}
+
+bool mapper1_write(nessys_t* nes, uint16_t addr, uint8_t data)
+{
+	uint8_t data_changed = 0x0;
+	mapper1_data* m1_data = (mapper1_data*)nes->mapper_data;
+	if (data & 0x80) {
+		m1_data->shift_reg = MAPPER1_SHIFT_REG_RESET;
+	} else {
+		bool shift_reg_full = m1_data->shift_reg & 0x1;
+		m1_data->shift_reg >>= 1;
+		m1_data->shift_reg |= (data & 0x1) << 4;
+		if (shift_reg_full) {
+			switch (addr & MAPPER1_ADDR_MASK) {
+			case MAPPER1_ADDR_CONTROL:
+				data_changed = (m1_data->control ^ m1_data->shift_reg) & 0x13;
+				m1_data->control = m1_data->shift_reg;
+				mapper1_update_name_tbl_map(nes);
+				mapper1_update_prg_map(nes);
+				mapper1_update_chr_map(nes);
+				break;
+			case MAPPER1_ADDR_CHR_BANK0:
+				data_changed = (m1_data->chr_bank0 ^ m1_data->shift_reg) & 0x1f;
+				m1_data->chr_bank0 = m1_data->shift_reg;
+				mapper1_update_chr_map(nes);
+				break;
+			case MAPPER1_ADDR_CHR_BANK1:
+				data_changed = (m1_data->chr_bank1 ^ m1_data->shift_reg) & 0x1f;
+				m1_data->chr_bank1 = m1_data->shift_reg;
+				mapper1_update_chr_map(nes);
+				break;
+			case MAPPER1_ADDR_PRG_BANK:
+				m1_data->prg_bank = m1_data->shift_reg;
+				mapper1_update_prg_map(nes);
+				break;
+			}
+			m1_data->shift_reg = MAPPER1_SHIFT_REG_RESET;
+		}
+	}
+	return (data_changed) ? true : false;
+}
+
 // mapper 4 functions
 void mapper4_update_memmap(nessys_t* nes)
 {
 	mapper4_data* m4_data = (mapper4_data*)nes->mapper_data;
 	// chr map
+	uint8_t* base = (nes->ppu.chr_rom_base) ? nes->ppu.chr_rom_base : nes->ppu.chr_ram_base;
 	if (m4_data->bank_select & 0x80) {
-		nes->ppu.chr_rom_bank[0] = nes->ppu.chr_rom_base + (m4_data->r[2] << 10);
-		nes->ppu.chr_rom_bank[1] = nes->ppu.chr_rom_base + (m4_data->r[3] << 10);
-		nes->ppu.chr_rom_bank[2] = nes->ppu.chr_rom_base + (m4_data->r[4] << 10);
-		nes->ppu.chr_rom_bank[3] = nes->ppu.chr_rom_base + (m4_data->r[5] << 10);
-		nes->ppu.chr_rom_bank[4] = nes->ppu.chr_rom_base + (m4_data->r[0] << 10);
-		nes->ppu.chr_rom_bank[5] = nes->ppu.chr_rom_base + (m4_data->r[0] << 10) + 0x400;
-		nes->ppu.chr_rom_bank[6] = nes->ppu.chr_rom_base + (m4_data->r[1] << 10);
-		nes->ppu.chr_rom_bank[7] = nes->ppu.chr_rom_base + (m4_data->r[1] << 10) + 0x400;
+		nes->ppu.chr_rom_bank[0] = base + (m4_data->r[2] << 10);
+		nes->ppu.chr_rom_bank[1] = base + (m4_data->r[3] << 10);
+		nes->ppu.chr_rom_bank[2] = base + (m4_data->r[4] << 10);
+		nes->ppu.chr_rom_bank[3] = base + (m4_data->r[5] << 10);
+		nes->ppu.chr_rom_bank[4] = base + (m4_data->r[0] << 10);
+		nes->ppu.chr_rom_bank[5] = base + (m4_data->r[0] << 10) + 0x400;
+		nes->ppu.chr_rom_bank[6] = base + (m4_data->r[1] << 10);
+		nes->ppu.chr_rom_bank[7] = base + (m4_data->r[1] << 10) + 0x400;
 	} else {
-		nes->ppu.chr_rom_bank[0] = nes->ppu.chr_rom_base + (m4_data->r[0] << 10);
-		nes->ppu.chr_rom_bank[1] = nes->ppu.chr_rom_base + (m4_data->r[0] << 10) + 0x400;
-		nes->ppu.chr_rom_bank[2] = nes->ppu.chr_rom_base + (m4_data->r[1] << 10);
-		nes->ppu.chr_rom_bank[3] = nes->ppu.chr_rom_base + (m4_data->r[1] << 10) + 0x400;
-		nes->ppu.chr_rom_bank[4] = nes->ppu.chr_rom_base + (m4_data->r[2] << 10);
-		nes->ppu.chr_rom_bank[5] = nes->ppu.chr_rom_base + (m4_data->r[3] << 10);
-		nes->ppu.chr_rom_bank[6] = nes->ppu.chr_rom_base + (m4_data->r[4] << 10);
-		nes->ppu.chr_rom_bank[7] = nes->ppu.chr_rom_base + (m4_data->r[5] << 10);
+		nes->ppu.chr_rom_bank[0] = base + (m4_data->r[0] << 10);
+		nes->ppu.chr_rom_bank[1] = base + (m4_data->r[0] << 10) + 0x400;
+		nes->ppu.chr_rom_bank[2] = base + (m4_data->r[1] << 10);
+		nes->ppu.chr_rom_bank[3] = base + (m4_data->r[1] << 10) + 0x400;
+		nes->ppu.chr_rom_bank[4] = base + (m4_data->r[2] << 10);
+		nes->ppu.chr_rom_bank[5] = base + (m4_data->r[3] << 10);
+		nes->ppu.chr_rom_bank[6] = base + (m4_data->r[4] << 10);
+		nes->ppu.chr_rom_bank[7] = base + (m4_data->r[5] << 10);
 	}
 	// prg map
 	if (m4_data->bank_select & 0x40) {
@@ -94,6 +263,10 @@ bool mapper4_write(nessys_t* nes, uint16_t addr, uint8_t data)
 				nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 1] = nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 0];
 				nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 2] = nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 3];
 			}
+			uint8_t b;
+			for (b = NESSYS_CHR_NTB_START_BANK + 4; b <= NESSYS_CHR_NTB_END_BANK; b++) {
+				nes->ppu.chr_rom_bank[b] = nes->ppu.chr_rom_bank[b - 4];
+			}
 			return true;
 		}
 		break;
@@ -148,6 +321,12 @@ bool nessys_init_mapper(nessys_t* nes)
 		nes->mapper_write = mapper_write_null;
 		nes->mapper_update = mapper_update_null;
 		nes->mapper_data = NULL;
+		break;
+	case 1:
+		nes->mapper_write = mapper1_write;
+		nes->mapper_update = mapper_update_null;
+		nes->mapper_data = malloc(sizeof(mapper1_data));
+		memset(nes->mapper_data, 0, sizeof(mapper1_data));
 		break;
 	case 4:
 		nes->mapper_write = mapper4_write;

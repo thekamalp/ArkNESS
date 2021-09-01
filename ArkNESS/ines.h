@@ -35,8 +35,11 @@ struct ines_header {
 	uint8_t prg_ram_size;  // in 8KB units
 	uint8_t flags9;
 	uint8_t flags10;
-	uint8_t pad0;
-	uint32_t pad1;
+	uint8_t flags11;
+	uint8_t flags12;
+	uint8_t flags13;
+	uint8_t flags14;
+	uint8_t flags15;
 };
 #pragma pack(pop)
 

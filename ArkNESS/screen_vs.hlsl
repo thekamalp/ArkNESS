@@ -19,7 +19,8 @@ VS_OUTPUT main(float2 pos : POSITION)
 	uint uscroll_y = (ppu.w >> 16) & 0x1FF;
 	//uint uscroll_y = (ppu.z >> 24) & 0xFF | ((ppu.x & 0x2) << 7);
 	float2 scroll = uint2((ppu.z >> 16) & 0xFF, uscroll_y);
-	uint max_y = (ppu.z >> 8) & 0xFF;//240 + 256 * ((uscroll_y & 0xFF) >= 240) + (uscroll_y & 0x100);// +((ppu.x & 0x2) << 7);
+	//uint max_y = (ppu.z >> 8) & 0xFF;
+	uint max_y = 240 + 256 * ((uscroll_y & 0xFF) >= 240) + (uscroll_y & 0x100);// +((ppu.x & 0x2) << 7);
 	scroll.x = scroll.x + ((ppu.x & 0x1) << 8);
 	//scroll.y = scroll.y + ((ppu.x & 0x2) << 7);
 	float2 start = float2(-128.0, -120.0);

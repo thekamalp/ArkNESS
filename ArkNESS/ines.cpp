@@ -24,6 +24,8 @@ bool ines_load_cart(nessys_t* nes, FILE* fh)
 		fseek(fh, 512, SEEK_CUR);
 	}
 
+	bool nes2 = (hdr.flags7 & INES_FLAGS7_NES2) ? true : false;
+
 	// get mirroring mode
 	nes->ppu.name_tbl_vert_mirror = hdr.flags6 & INES_FLAGS6_MIRRORING;
 
@@ -37,18 +39,31 @@ bool ines_load_cart(nessys_t* nes, FILE* fh)
 
 	// allocate space for prg rom/ram and chr rom
 	if (hdr.prg_rom_size) {
-		nes->prg_rom_size = 0x4000 * hdr.prg_rom_size;
+		nes->prg_rom_size = hdr.prg_rom_size;
+		if (nes2) nes->prg_rom_size |= (hdr.flags9 & 0xf) << 8;
+		nes->prg_rom_size *= 0x4000;
 		nes->prg_rom_base = (uint8_t*)malloc(nes->prg_rom_size);
 		if (nes->prg_rom_base == NULL) return false;
 		fread(nes->prg_rom_base, 0x4000, hdr.prg_rom_size, fh);
 	}
-	uint32_t ram_size = (hdr.prg_ram_size) ? hdr.prg_ram_size * 0x2000 : 0x2000;
+	uint32_t ram_size = (nes2) ? ((hdr.flags10 & 0xf) ? 64 << (hdr.flags10 & 0xf) : 0) :
+		((hdr.prg_ram_size) ? hdr.prg_ram_size * 0x2000 : 0x2000);
 	nes->prg_ram_base = (uint8_t*)malloc(ram_size);
 	if (hdr.chr_rom_size) {
-		nes->ppu.chr_rom_size = 0x2000 * hdr.chr_rom_size;
+		nes->ppu.chr_rom_size = hdr.chr_rom_size;
+		if (nes2) nes->ppu.chr_rom_size |= (hdr.flags9 & 0xf0) << 4;
+		nes->ppu.chr_rom_size *= 0x2000;
 		nes->ppu.chr_rom_base = (uint8_t*)malloc(nes->ppu.chr_rom_size);
 		if (nes->ppu.chr_rom_base == NULL) return false;
 		fread(nes->ppu.chr_rom_base, 0x2000, hdr.chr_rom_size, fh);
+	} else if (hdr.flags11 & 0xf) {
+		nes->ppu.chr_ram_size = 64 << (hdr.flags11 & 0xf);
+		nes->ppu.chr_ram_base = (uint8_t*)malloc(nes->ppu.chr_ram_size);
+		if (nes->ppu.chr_ram_base == NULL) return false;
+	} else {
+		nes->ppu.chr_ram_size = 0x2000;  // 8KB of ram
+		nes->ppu.chr_ram_base = (uint8_t*)malloc(nes->ppu.chr_ram_size);
+		if (nes->ppu.chr_ram_base == NULL) return false;
 	}
 	return true;
 }
