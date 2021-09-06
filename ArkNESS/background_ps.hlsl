@@ -23,7 +23,9 @@ float4 main(VS_OUTPUT i) : SV_TARGET
 {
 	float4 o_color;
 	//uint2 n_pos = floor(0.5*(i_pos.xy - float2(64.5, 0.5)));
-	uint2 n_pos = (uint2) floor(i.texcoord.xy);
+	float2 f_pos = i.texcoord.xy;
+	f_pos.y += 256.0 * (i.texcoord.y < 0);
+	uint2 n_pos = (uint2) floor(f_pos);
 	uint max_y = (uint) floor(i.texcoord.z);
 	n_pos.y += 16 * (n_pos.y >= max_y);
 	uint screen_offset = ((n_pos.y & 0x100) >> 1) | ((n_pos.x & 0x100) >> 2);
