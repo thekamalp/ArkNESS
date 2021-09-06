@@ -646,6 +646,7 @@ void K2CALLBACK nessys_display(void* ptr)
 				uint32_t global_x = nes->ppu.scroll[0] + ((nes->ppu.reg[0] & 0x01) << 8) + sprite_x;
 				uint32_t global_y = nes->ppu.scroll_y                                    + sprite_y;
 				if (((nes->ppu.scroll_y & 0xFF) < 240) && ((nes->ppu.scroll_y & 0xFF) + sprite_y >= 240)) global_y += 16;
+				if (((nes->ppu.scroll_y & 0xFF) >=240) && ((nes->ppu.scroll_y & 0xFF) + sprite_y >= 256)) global_y -= 256;
 				uint32_t ntb_addr = ((global_x & 0xF8) >> 3) | ((global_y & 0xF8) << 2) | ((global_x & 0x100) << 2) | ((global_y & 0x100) << 3);
 				uint32_t pat_addr = (*nessys_ppu_mem(nes, NESSYS_CHR_NTB_WIN_MIN + ntb_addr) << 4) | ((nes->ppu.reg[0] & 0x10) << 8);
 				//printf("gx/y: 0x%x 0x%x ntb_addr: 0x%x pat_addr: 0x%x ", global_x, global_y, ntb_addr, pat_addr);
@@ -658,6 +659,7 @@ void K2CALLBACK nessys_display(void* ptr)
 				bg_pattern[1] = *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr));
 				bg_pattern[1] |= *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr + 8));
 				if (((global_y & 0xFF) < 240) && ((global_y & 0xFF) + 8) >= 240) global_y += 16;
+				if (((global_y & 0xFF) >=240) && ((global_y & 0xFF) + 8) >= 256) global_y -= 256;
 				global_y += 8;
 				ntb_addr = ((global_x & 0xF8) >> 3) | ((global_y & 0xF8) << 2) | ((global_x & 0x100) << 2) | ((global_y & 0x100) << 3);
 				pat_addr = (*nessys_ppu_mem(nes, NESSYS_CHR_NTB_WIN_MIN + ntb_addr) << 4) | ((nes->ppu.reg[0] & 0x10) << 8);
@@ -669,6 +671,7 @@ void K2CALLBACK nessys_display(void* ptr)
 				bg_pattern[2] = *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr));
 				bg_pattern[2] |= *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr + 8));
 				if (((global_y & 0xFF) < 240) && ((global_y & 0xFF) + 8) >= 240) global_y += 16;
+				if (((global_y & 0xFF) >=240) && ((global_y & 0xFF) + 8) >= 256) global_y -= 256;
 				global_y += 8;
 				ntb_addr = ((global_x & 0xF8) >> 3) | ((global_y & 0xF8) << 2) | ((global_x & 0x100) << 2) | ((global_y & 0x100) << 3);
 				pat_addr = (*nessys_ppu_mem(nes, NESSYS_CHR_NTB_WIN_MIN + ntb_addr) << 4) | ((nes->ppu.reg[0] & 0x10) << 8);
@@ -1845,6 +1848,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 						// if bit 2 is 0, increment address by 1 (one step horizontal), otherwise, increment by 32 (one step vertical)
 						//printf("reading ppu addr: 0x%x\n", nes->ppu.mem_4screen);
 						nes->ppu.mem_addr += !((nes->ppu.reg[0] & 0x4) >> 1) + ((nes->ppu.reg[0] & 0x4) << 3);
+						nes->ppu.mem_addr &= NESSYS_PPU_WIN_MAX;
 					}
 					break;
 				}
@@ -2057,6 +2061,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					}
 					if (nes->ppu.addr_toggle) {
 						nes->ppu.mem_addr = nes->ppu.t_mem_addr;
+						nes->ppu.mem_addr &= NESSYS_PPU_WIN_MAX;
 						nes->ppu.scroll_y = ((nes->ppu.reg[0] & 0x2) << 7) | nes->ppu.scroll[1];
 						nes->ppu.max_y = 240 + (nes->ppu.scroll_y & 0x100);// +256 * ((nes->ppu.scroll_y & 0xFF) >= 240);
 						nes->ppu.scroll_y_changed = true;
@@ -2078,6 +2083,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					// if bit 2 is 0, increment address by 1 (one step horizontal), otherwise, increment by 32 (one step vertical)
 					//printf("writing ppu  addr: 0x%x\n", nes->ppu.mem_addr);
 					nes->ppu.mem_addr += !((nes->ppu.reg[0] & 0x4) >> 1) + ((nes->ppu.reg[0] & 0x4) << 3);
+					nes->ppu.mem_addr &= NESSYS_PPU_WIN_MAX;
 					if (skip_print == 0) printf(" vram addr nest 0x%x\n", nes->ppu.mem_addr);
 					break;
 				case 0x14:
