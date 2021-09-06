@@ -2093,7 +2093,8 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				if(skip_print == 0) printf("writing to rom a: 0x%x d: 0x%x\n", addr, result);
 				ppu_ever_written |= nes->mapper_write(nes, addr, (uint8_t)result);
 			}
-			cycle_count += NESSYS_PPU_PER_CPU_CLK*(op->num_cycles + penalty_cycles);
+			nes->cpu_cycle_inc = op->num_cycles + penalty_cycles;
+			cycle_count += NESSYS_PPU_PER_CPU_CLK*(nes->cpu_cycle_inc);
 			// cycles remaining may go negative if we have a oam dma transfer
 			// the cycle penalty is accounted for until after th decision has already been bade to execute it
 			nes->cycles_remaining -= NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles);

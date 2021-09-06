@@ -20,6 +20,8 @@ const uint16_t MAPPER1_ADDR_PRG_BANK = 0xE000;
 
 const uint8_t MAPPER1_PRG_BANK_SIZE_LOG2 = 14;
 const uint8_t MAPPER1_CHR_BANK_SIZE_LOG2 = 12;
+const uint32_t MAPPER1_PRG_BANK_MASK = (1 << MAPPER1_PRG_BANK_SIZE_LOG2) - 1;
+const uint32_t MAPPER1_CHR_BANK_MASK = (1 << MAPPER1_CHR_BANK_SIZE_LOG2) - 1;
 
 const uint8_t MAPPER1_SHIFT_REG_RESET = 0x10;
 
@@ -36,6 +38,7 @@ struct mapper1_data {
 // mapper 2 structs/constants
 
 const uint8_t MAPPER2_PRG_BANK_SIZE_LOG2 = 14;
+const uint32_t MAPPER2_PRG_BANK_MASK = (1 << MAPPER2_PRG_BANK_SIZE_LOG2) - 1;
 
 struct mapper2_data {
 	uint8_t prg_bank;
@@ -58,6 +61,8 @@ const uint16_t MAPPER4_ADDR_IRQ_ENABLE = 0xE001;
 
 const uint8_t MAPPER4_PRG_BANK_SIZE_LOG2 = 13;
 const uint8_t MAPPER4_CHR_BANK_SIZE_LOG2 = 10;
+const uint32_t MAPPER4_PRG_BANK_MASK = (1 << MAPPER4_PRG_BANK_SIZE_LOG2) - 1;
+const uint32_t MAPPER4_CHR_BANK_MASK = (1 << MAPPER4_CHR_BANK_SIZE_LOG2) - 1;
 
 const uint8_t MAPPER4_REG_MASK[] = { 0xfe, 0xfe, 0xff, 0xff, 0xff, 0xff, 0x3f, 0x3f };
 
@@ -71,4 +76,50 @@ struct mapper4_data {
 	uint8_t irq_counter;
 	uint8_t last_scanline;
 	uint8_t last_upper_ppu_addr;
+};
+
+// ------------------------------------------------------------
+// mapper 7 struct/constants
+
+const uint8_t MAPPER7_PRG_BANK_SIZE_LOG2 = 15;
+const uint32_t MAPPER7_PRG_BANK_MASK = (1 << MAPPER7_PRG_BANK_SIZE_LOG2) - 1;
+
+const uint8_t MAPPER7_PRG_BANK_BITS = 0x7;
+const uint8_t MAPPER7_NTB_SELECT = 0x10;
+
+struct mapper7_data {
+	uint8_t bank;
+};
+
+// ------------------------------------------------------------
+// mapper 69 struct/constants
+
+const uint16_t MAPPER69_ADDR_MASK = 0xE000;
+
+const uint16_t MAPPER69_ADDR_COMMAND = 0x8000;
+const uint16_t MAPPER69_ADDR_PARAMETER = 0xA000;
+
+const uint8_t MAPPER69_PRG_BANK_SIZE_LOG2 = 13;
+const uint8_t MAPPER69_CHR_BANK_SIZE_LOG2 = 10;
+const uint32_t MAPPER69_PRG_BANK_MASK = (1 << MAPPER69_PRG_BANK_SIZE_LOG2) - 1;
+const uint32_t MAPPER69_CHR_BANK_MASK = (1 << MAPPER69_CHR_BANK_SIZE_LOG2) - 1;
+
+const uint8_t MAPPER69_FLAGS_IRQ_ENABLE = 0x01;
+const uint8_t MAPPER69_FLAGS_IRQ_COUNTER_ENABLE = 0x80;
+const uint8_t MAPPER69_FLAGS_MIRROR_MODE = 0x30;
+const uint8_t MAPPER69_MIRROR_MODE_SHIFT = 4;
+
+const uint8_t MAPPER69_MIRROR_MODE_VERTICAL = 0x00;
+const uint8_t MAPPER69_MIRROR_MODE_HORIZONTAL = 0x10;
+const uint8_t MAPPER69_MIRROR_MODE_ONE_SCREEN_LOWER = 0x20;
+const uint8_t MAPPER69_MIRROR_MODE_ONE_SCREEN_UPPER = 0x30;
+
+const uint8_t MAPPER69_PRG_BANK0_RAM_SELECT = 0x40;
+
+struct mapper69_data {
+	uint8_t command;
+	uint8_t flags;
+	uint16_t irq_counter;
+	uint8_t prg_bank[4];
+	uint8_t chr_bank[8];
 };

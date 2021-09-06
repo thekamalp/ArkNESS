@@ -72,6 +72,7 @@ void mapper1_update_prg_map(nessys_t* nes)
 			nes->prg_rom_bank[b] = nes->prg_rom_base + offset;
 			nes->prg_rom_bank_mask[b] = NESSYS_PRG_MEM_MASK;
 			offset += NESSYS_PRG_BANK_SIZE;
+			if (offset >= nes->prg_rom_size) offset &= ~MAPPER1_PRG_BANK_MASK;
 		}
 		break;
 	case 0x8:
@@ -82,12 +83,14 @@ void mapper1_update_prg_map(nessys_t* nes)
 			nes->prg_rom_bank[b] = nes->prg_rom_base + offset;
 			nes->prg_rom_bank_mask[b] = NESSYS_PRG_MEM_MASK;
 			offset += NESSYS_PRG_BANK_SIZE;
+			if (offset >= nes->prg_rom_size) offset &= ~MAPPER1_PRG_BANK_MASK;
 		}
 		offset = (m1_data->prg_bank & 0xf) << MAPPER1_PRG_BANK_SIZE_LOG2;
 		for (b = HALF_BANK; b < NESSYS_PRG_NUM_BANKS; b++) {
 			nes->prg_rom_bank[b] = nes->prg_rom_base + offset;
 			nes->prg_rom_bank_mask[b] = NESSYS_PRG_MEM_MASK;
 			offset += NESSYS_PRG_BANK_SIZE;
+			if (offset >= nes->prg_rom_size) offset &= ~MAPPER1_PRG_BANK_MASK;
 		}
 		break;
 	case 0xc:
@@ -98,12 +101,14 @@ void mapper1_update_prg_map(nessys_t* nes)
 			nes->prg_rom_bank[b] = nes->prg_rom_base + offset;
 			nes->prg_rom_bank_mask[b] = NESSYS_PRG_MEM_MASK;
 			offset += NESSYS_PRG_BANK_SIZE;
+			if (offset >= nes->prg_rom_size) offset &= ~MAPPER1_PRG_BANK_MASK;
 		}
 		offset = nes->prg_rom_size - 0x4000;
 		for (b = HALF_BANK; b < NESSYS_PRG_NUM_BANKS; b++) {
 			nes->prg_rom_bank[b] = nes->prg_rom_base + offset;
 			nes->prg_rom_bank_mask[b] = NESSYS_PRG_MEM_MASK;
 			offset += NESSYS_PRG_BANK_SIZE;
+			if (offset >= nes->prg_rom_size) offset &= ~MAPPER1_PRG_BANK_MASK;
 		}
 		break;
 	}
@@ -155,9 +160,9 @@ void mapper1_reset(nessys_t* nes)
 
 bool mapper1_write(nessys_t* nes, uint16_t addr, uint8_t data)
 {
-	uint16_t max_prg_rom_bank_offset = nes->prg_rom_size >> MAPPER1_PRG_BANK_SIZE_LOG2;
-	uint16_t max_chr_rom_bank_offset = nes->ppu.chr_rom_size >> MAPPER1_CHR_BANK_SIZE_LOG2;
-	if (max_chr_rom_bank_offset == 0) max_chr_rom_bank_offset = nes->ppu.chr_ram_size >> MAPPER1_CHR_BANK_SIZE_LOG2;
+	uint16_t max_prg_rom_bank_offset = (nes->prg_rom_size >> MAPPER1_PRG_BANK_SIZE_LOG2) + ((nes->prg_rom_size & MAPPER1_PRG_BANK_MASK) ? 1 : 0);
+	uint16_t max_chr_rom_bank_offset = (nes->ppu.chr_rom_size >> MAPPER1_CHR_BANK_SIZE_LOG2) + ((nes->ppu.chr_rom_size & MAPPER1_CHR_BANK_MASK) ? 1 : 0);
+	if (max_chr_rom_bank_offset == 0) max_chr_rom_bank_offset = (nes->ppu.chr_ram_size >> MAPPER1_CHR_BANK_SIZE_LOG2) + ((nes->ppu.chr_ram_size & MAPPER1_CHR_BANK_MASK) ? 1 : 0);
 	uint8_t data_changed = 0x0;
 	mapper1_data* m1_data = (mapper1_data*)nes->mapper_data;
 	if (data & 0x80) {
@@ -199,7 +204,7 @@ bool mapper1_write(nessys_t* nes, uint16_t addr, uint8_t data)
 // mapper 2 functions
 bool mapper2_write(nessys_t* nes, uint16_t addr, uint8_t data)
 {
-	uint16_t max_prg_rom_bank_offset = nes->prg_rom_size >> MAPPER2_PRG_BANK_SIZE_LOG2;
+	uint16_t max_prg_rom_bank_offset = (nes->prg_rom_size >> MAPPER2_PRG_BANK_SIZE_LOG2) + ((nes->prg_rom_size & MAPPER2_PRG_BANK_MASK) ? 1 : 0);
 	mapper2_data* m2_data = (mapper2_data*)nes->mapper_data;
 	uint8_t data_changed = m2_data->prg_bank;
 	m2_data->prg_bank = (data & 0xf) % max_prg_rom_bank_offset;
@@ -270,9 +275,9 @@ void mapper4_eval_irq_timer(nessys_t* nes)
 bool mapper4_write(nessys_t* nes, uint16_t addr, uint8_t data)
 {
 	bool data_change = false;
-	uint16_t max_prg_rom_bank_offset = nes->prg_rom_size >> MAPPER4_PRG_BANK_SIZE_LOG2;
-	uint16_t max_chr_rom_bank_offset = nes->ppu.chr_rom_size >> MAPPER4_CHR_BANK_SIZE_LOG2;
-	if (max_chr_rom_bank_offset == 0) max_chr_rom_bank_offset = nes->ppu.chr_ram_size >> MAPPER4_CHR_BANK_SIZE_LOG2;
+	uint16_t max_prg_rom_bank_offset = (nes->prg_rom_size >> MAPPER4_PRG_BANK_SIZE_LOG2) + ((nes->prg_rom_size & MAPPER4_PRG_BANK_MASK) ? 1 : 0);
+	uint16_t max_chr_rom_bank_offset = (nes->ppu.chr_rom_size >> MAPPER4_CHR_BANK_SIZE_LOG2) + ((nes->ppu.chr_rom_size & MAPPER4_CHR_BANK_MASK) ? 1 : 0);
+	if (max_chr_rom_bank_offset == 0) max_chr_rom_bank_offset = (nes->ppu.chr_ram_size >> MAPPER4_CHR_BANK_SIZE_LOG2) + ((nes->ppu.chr_ram_size & MAPPER4_CHR_BANK_MASK) ? 1 : 0);
 	mapper4_data* m4_data = (mapper4_data*)nes->mapper_data;
 	uint16_t max_bank_offset = ((m4_data->bank_select & 7) < 6) ? max_chr_rom_bank_offset : max_prg_rom_bank_offset;
 	//if (nes->scanline >= 0) printf("rom write scanlien %d a: 0x%x d 0x%x\n", nes->scanline, addr, data);
@@ -351,6 +356,177 @@ bool mapper4_update(nessys_t* nes)
 	return false;
 }
 
+// mapper7 functions
+void mapper7_update_memmap(nessys_t* nes)
+{
+	mapper7_data* m7_data = (mapper7_data*)nes->mapper_data;
+	// first do nametable
+	uint8_t b;
+	uint16_t ntb_offset = (m7_data->bank & MAPPER7_NTB_SELECT) ? 0x400 : 0x0;
+	for (b = NESSYS_CHR_NTB_START_BANK; b <= NESSYS_CHR_NTB_END_BANK; b++) {
+		nes->ppu.chr_rom_bank[b] = nes->ppu.mem + ntb_offset;
+	}
+	// prg rom mapping
+	uint8_t* base = nes->prg_rom_base;
+	uint32_t offset = (m7_data->bank & MAPPER7_PRG_BANK_BITS) << MAPPER7_PRG_BANK_SIZE_LOG2;
+	for (b = 0; b < 4; b++) {
+		nes->prg_rom_bank[4 + b] = base + offset;
+		offset += NESSYS_PRG_BANK_SIZE;
+	}
+}
+
+bool mapper7_write(nessys_t* nes, uint16_t addr, uint8_t data)
+{
+	mapper7_data* m7_data = (mapper7_data*)nes->mapper_data;
+	uint8_t data_changed = m7_data->bank;
+	uint16_t max_prg_rom_bank_offset = (nes->prg_rom_size >> MAPPER7_PRG_BANK_SIZE_LOG2) + ((nes->prg_rom_size & MAPPER7_PRG_BANK_MASK) ? 1 : 0);
+	m7_data->bank = (data & MAPPER7_PRG_BANK_BITS) % max_prg_rom_bank_offset;
+	m7_data->bank |= (data & MAPPER7_NTB_SELECT);
+	data_changed ^= m7_data->bank;
+	data_changed &= MAPPER7_NTB_SELECT;  // only nametable mapping can affect rendering
+	mapper7_update_memmap(nes);
+	return (data_changed) ? true : false;
+}
+
+// mapper69 functions
+void mapper69_update_nametable(nessys_t* nes)
+{
+	mapper69_data* m69_data = (mapper69_data*)nes->mapper_data;
+	uint8_t mirror_mode = m69_data->flags & MAPPER69_FLAGS_MIRROR_MODE;
+	nes->ppu.name_tbl_vert_mirror = (mirror_mode == MAPPER69_MIRROR_MODE_VERTICAL);
+	switch (mirror_mode) {
+	case MAPPER69_MIRROR_MODE_VERTICAL:
+	case MAPPER69_MIRROR_MODE_HORIZONTAL:
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 0] = nes->ppu.mem;
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 3] = nes->ppu.mem + 0x400;
+		break;
+	case MAPPER69_MIRROR_MODE_ONE_SCREEN_LOWER:
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 0] = nes->ppu.mem;
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 3] = nes->ppu.mem;
+		break;
+	case MAPPER69_MIRROR_MODE_ONE_SCREEN_UPPER:
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 0] = nes->ppu.mem + 0x400;
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 3] = nes->ppu.mem + 0x400;
+		break;
+	}
+	if (nes->ppu.name_tbl_vert_mirror) {
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 1] = nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 3];
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 2] = nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 0];
+	} else {
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 1] = nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 0];
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 2] = nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 3];
+	}
+	uint8_t b;
+	for (b = NESSYS_CHR_NTB_START_BANK + 4; b <= NESSYS_CHR_NTB_END_BANK; b++) {
+		nes->ppu.chr_rom_bank[b] = nes->ppu.chr_rom_bank[b - 4];
+	}
+}
+
+void mapper69_update_chr_map(nessys_t* nes)
+{
+	mapper69_data* m69_data = (mapper69_data*)nes->mapper_data;
+	uint8_t* base = (nes->ppu.chr_rom_base) ? nes->ppu.chr_rom_base : nes->ppu.chr_ram_base;
+	uint8_t b;
+	for (b = 0; b < 8; b++) {
+		nes->ppu.chr_rom_bank[b] = base + (m69_data->chr_bank[b] << MAPPER69_CHR_BANK_SIZE_LOG2);
+	}
+}
+
+void mapper69_update_prg_map(nessys_t* nes)
+{
+	mapper69_data* m69_data = (mapper69_data*)nes->mapper_data;
+	uint8_t* base = (m69_data->prg_bank[0] & MAPPER69_PRG_BANK0_RAM_SELECT) ? nes->prg_ram_base : nes->prg_rom_base;
+	nes->prg_rom_bank[3] = base + ((m69_data->prg_bank[0] & 0x3f) << MAPPER69_PRG_BANK_SIZE_LOG2);
+	base = nes->prg_rom_base;
+	uint8_t b;
+	for (b = 1; b < 4; b++) {
+		nes->prg_rom_bank[3 + b] = base + (m69_data->prg_bank[b] << MAPPER69_PRG_BANK_SIZE_LOG2);
+	}
+}
+
+bool mapper69_write(nessys_t* nes, uint16_t addr, uint8_t data)
+{
+	uint8_t data_change = 0;
+	uint16_t max_prg_rom_bank_offset = (nes->prg_rom_size >> MAPPER69_PRG_BANK_SIZE_LOG2) + ((nes->prg_rom_size & MAPPER69_PRG_BANK_MASK) ? 1 : 0);
+	uint16_t max_chr_rom_bank_offset = (nes->ppu.chr_rom_size >> MAPPER69_CHR_BANK_SIZE_LOG2) + ((nes->ppu.chr_rom_size & MAPPER69_CHR_BANK_MASK) ? 1 : 0);
+	uint16_t max_chr_ram_bank_offset = (nes->ppu.chr_ram_size >> MAPPER69_CHR_BANK_SIZE_LOG2) + ((nes->ppu.chr_ram_size & MAPPER69_CHR_BANK_MASK) ? 1 : 0);
+	if (max_chr_rom_bank_offset == 0) max_chr_rom_bank_offset = max_chr_ram_bank_offset;
+	mapper69_data* m69_data = (mapper69_data*)nes->mapper_data;
+	switch (addr & MAPPER69_ADDR_MASK) {
+	case MAPPER69_ADDR_COMMAND:
+		m69_data->command = data & 0xf;
+		break;
+	case MAPPER69_ADDR_PARAMETER:
+		switch (m69_data->command) {
+		case 0:
+		case 1:
+		case 2:
+		case 3:
+		case 4:
+		case 5:
+		case 6:
+		case 7:
+			data_change = m69_data->chr_bank[m69_data->command];
+			m69_data->chr_bank[m69_data->command] = data % max_chr_rom_bank_offset;
+			data_change ^= m69_data->chr_bank[m69_data->command];
+			mapper69_update_chr_map(nes);
+			break;
+		case 8:
+			m69_data->prg_bank[0] = (data & 0x3f) % max_prg_rom_bank_offset;
+			m69_data->prg_bank[0] |= (data & 0xc0);
+			mapper69_update_prg_map(nes);
+			break;
+		case 9:
+		case 10:
+		case 11:
+			m69_data->prg_bank[m69_data->command - 8] = (data & 0x3f) % max_prg_rom_bank_offset;
+			mapper69_update_prg_map(nes);
+			break;
+		case 12:
+			m69_data->flags &= ~MAPPER69_FLAGS_MIRROR_MODE;
+			m69_data->flags |= (data << MAPPER69_MIRROR_MODE_SHIFT) & MAPPER69_FLAGS_MIRROR_MODE;
+			mapper69_update_nametable(nes);
+			break;
+		case 13:
+			nes->mapper_irq_cycles = 0;
+			m69_data->flags &= ~(MAPPER69_FLAGS_IRQ_COUNTER_ENABLE | MAPPER69_FLAGS_IRQ_ENABLE);
+			m69_data->flags |= data & (MAPPER69_FLAGS_IRQ_COUNTER_ENABLE | MAPPER69_FLAGS_IRQ_ENABLE);
+			break;
+		case 14:
+			m69_data->irq_counter &= 0xFF00;
+			m69_data->irq_counter |= data;
+			break;
+		case 15:
+			m69_data->irq_counter &= 0x00FF;
+			m69_data->irq_counter |= ((uint16_t)data) << 8;
+			break;
+		}
+		break;
+	}
+	return (data_change) ? true : false;
+}
+
+bool mapper69_update(nessys_t* nes)
+{
+	mapper69_data* m69_data = (mapper69_data*)nes->mapper_data;
+	if (m69_data->flags & MAPPER69_FLAGS_IRQ_COUNTER_ENABLE) {
+		if (m69_data->irq_counter < nes->cpu_cycle_inc && (m69_data->flags & MAPPER69_FLAGS_IRQ_ENABLE)) {
+			nes->mapper_irq_cycles = 1;
+		}
+		m69_data->irq_counter -= nes->cpu_cycle_inc;
+	}
+	return false;
+}
+
+void mapper69_reset(nessys_t* nes)
+{
+	mapper69_data* m69_data = (mapper69_data*)nes->mapper_data;
+	m69_data->prg_bank[0] = 0xc0;
+	mapper69_update_chr_map(nes);
+	mapper69_update_prg_map(nes);
+	mapper69_update_nametable(nes);
+}
+
 bool nessys_init_mapper(nessys_t* nes)
 {
 	bool success = true;
@@ -378,6 +554,20 @@ bool nessys_init_mapper(nessys_t* nes)
 		nes->mapper_update = mapper4_update;
 		nes->mapper_data = malloc(sizeof(mapper4_data));
 		memset(nes->mapper_data, 0, sizeof(mapper4_data));
+		break;
+	case 7:
+		nes->mapper_write = mapper7_write;
+		nes->mapper_update = mapper_update_null;
+		nes->mapper_data = malloc(sizeof(mapper7_data));
+		memset(nes->mapper_data, 0, sizeof(mapper7_data));
+		mapper7_update_memmap(nes);
+		break;
+	case 69:
+		nes->mapper_write = mapper69_write;
+		nes->mapper_update = mapper69_update;
+		nes->mapper_data = malloc(sizeof(mapper69_data));
+		memset(nes->mapper_data, 0, sizeof(mapper69_data));
+		mapper69_reset(nes);
 		break;
 	default:
 		printf("Uknown mapper id: %d\n", nes->mapper_id);

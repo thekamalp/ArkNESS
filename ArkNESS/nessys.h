@@ -327,6 +327,7 @@ struct nessys_t {
 	uint32_t dmc_irq_cycles;      // cycles until a dmc irq signal is set; if 0, no irq pending
 	int32_t scanline;  // scanline number
 	int32_t scanline_cycle;  // cycles after the start of current scanline
+	uint32_t cpu_cycle_inc;
 	uint8_t in_nmi;
 	uint8_t pad0[3];
 	nessys_cpu_regs_t reg;
