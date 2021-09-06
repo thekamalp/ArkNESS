@@ -62,7 +62,7 @@ void nessys_init(nessys_t* nes)
 	nes->ds_sprite = nes->gfx->k2CreateDepthState(&ds_desc);
 
 	rs_desc.fillMode = K2FILL_SOLID;
-	rs_desc.cullMode = K2CULL_BACK;
+	rs_desc.cullMode = K2CULL_NONE;
 	rs_desc.frontCCW = false;
 	rs_desc.zClipEnable = false;
 	rs_desc.scissorEnable = true;
