@@ -248,7 +248,7 @@ const c6502_op_code_t C6502_OP_CODE[C6502_NUM_OPCODES] = {
 	{C6502_INS_STX, "STX", C6502_ADDR_ZEROPAGE,   2, 3, C6502_FL_NONE         },  // opcode: 0x86
 	{C6502_INS_SAX, "SAX", C6502_ADDR_ZEROPAGE,   2, 3, C6502_FL_UNDOCUMENTED },  // opcode: 0x87
 
-	{C6502_INS_DEY, "DEY", C6502_ADDR_NONE,       1, 3, C6502_FL_NONE         },  // opcode: 0x88
+	{C6502_INS_DEY, "DEY", C6502_ADDR_NONE,       1, 2, C6502_FL_NONE         },  // opcode: 0x88
 	{C6502_INS_NOP, "NOP", C6502_ADDR_IMMED,      2, 2, C6502_FL_UNDOCUMENTED },  // opcode: 0x89
 	{C6502_INS_TXA, "TXA", C6502_ADDR_NONE,       1, 2, C6502_FL_NONE         },  // opcode: 0x8A
 	{C6502_INS_ANE, "ANE", C6502_ADDR_IMMED,      2, 2, C6502_FL_UNDOCUMENTED },  // opcode: 0x8B

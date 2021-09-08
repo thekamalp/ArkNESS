@@ -542,38 +542,36 @@ void K2CALLBACK nessys_display(void* ptr)
 			//nes->ppu.scroll_y = 237;
 		}
 		nes->gfx->k2Clear(K2CLEAR_DEPTH | K2CLEAR_STENCIL, clear_color, 1.0f, 0);
-		if (nes->ppu.reg[0x1] & 0x18) {
-			// initialize palette if rendering background or sprites
-			for (i = 0; i < NESSYS_PPU_PAL_SIZE; i++) {
-				for (c = 0; c < 3; c++) {
-					index = ((i & 0x3) == 0) ? 0 : i;
-					palette[4 * i + c] = NESSYS_PPU_PALETTE[3 * nes->ppu.pal[index] + c];
-				}
-				palette[4 * i + 3] = ((i & 0x3) == 0) ? 0.0f : 1.0f;
+		// initialize palette if rendering background or sprites
+		for (i = 0; i < NESSYS_PPU_PAL_SIZE; i++) {
+			for (c = 0; c < 3; c++) {
+				index = ((i & 0x3) == 0) ? 0 : i;
+				palette[4 * i + c] = NESSYS_PPU_PALETTE[3 * nes->ppu.pal[index] + c];
 			}
-			nes->gfx->k2CBUpdate(nes->cb_ppu, &(nes->ppu.reg));
+			palette[4 * i + 3] = ((i & 0x3) == 0) ? 0.0f : 1.0f;
 		}
+		nes->gfx->k2CBUpdate(nes->cb_ppu, &(nes->ppu.reg));
+
 		//if (nes->scanline) 
 		//printf("scanline %d ppureg[0]: 0x%x scroll: %d %d %d ppu addr 0x%x\n",
 		//	nes->scanline, nes->ppu.reg[0], nes->ppu.scroll[0], nes->ppu.scroll[1], nes->ppu.scroll_y, nes->ppu.mem_addr);
 
+		nes->gfx->k2AttachRasterizerState(nes->rs_normal);
+		nes->gfx->k2AttachBlendState(nes->bs_normal);
+		nes->gfx->k2AttachDepthState(nes->ds_none);
+
+		nes->gfx->k2SetScissorRect(64, 2*nes->scanline, 576, 480);
+
+		// update palette
+		nes->gfx->k2CBUpdate(nes->cb_palette, palette);
+		nes->gfx->k2AttachShaderGroup(nes->sg_fill);
+		nes->gfx->k2AttachConstantGroup(nes->cg_fill);
+		nes->gfx->k2AttachVertexGroup(nes->vg_fullscreen, 4);
+
+		nes->gfx->k2Draw();
+
 		if (nes->ppu.reg[0x1] & 0x08) {
 			// enable background rendering
-			nes->gfx->k2AttachRasterizerState(nes->rs_normal);
-			nes->gfx->k2AttachBlendState(nes->bs_normal);
-			nes->gfx->k2AttachDepthState(nes->ds_none);
-
-			int32_t left_x = 80 - ((nes->ppu.reg[1] << 3) & 0x10);
-			nes->gfx->k2SetScissorRect(left_x, 2*nes->scanline, 576, 480);
-
-			// update palette
-			nes->gfx->k2CBUpdate(nes->cb_palette, palette);
-			nes->gfx->k2AttachShaderGroup(nes->sg_fill);
-			nes->gfx->k2AttachConstantGroup(nes->cg_fill);
-			nes->gfx->k2AttachVertexGroup(nes->vg_fullscreen, 4);
-
-			nes->gfx->k2Draw();
-
 			// update constants
 			// nametable update
 			index = NESSYS_CHR_NTB_WIN_MIN;
@@ -592,6 +590,8 @@ void K2CALLBACK nessys_display(void* ptr)
 			}
 			nes->gfx->k2CBUpdate(nes->cb_pattern, buffer);
 
+			int32_t left_x = 80 - ((nes->ppu.reg[1] << 3) & 0x10);
+			nes->gfx->k2SetScissorRect(left_x, 2 * nes->scanline, 576, 480);
 			nes->gfx->k2AttachBlendState(nes->bs_mask);
 			nes->gfx->k2AttachDepthState(nes->ds_normal);
 			nes->gfx->k2AttachShaderGroup(nes->sg_background);
@@ -641,7 +641,7 @@ void K2CALLBACK nessys_display(void* ptr)
 		if ((nes->ppu.reg[0x1] & 0x18) && ((nes->ppu.reg[2] & 0x40)==0x0)) {
 			// sprite and background rendering must be enabled
 			uint32_t sprite_x = nes->ppu.oam[3];
-			uint32_t sprite_y = nes->ppu.oam[0];
+			uint32_t sprite_y = nes->ppu.oam[0] + 1;
 			if (sprite_y < 240) {
 				uint32_t global_x = nes->ppu.scroll[0] + ((nes->ppu.reg[0] & 0x01) << 8) + sprite_x;
 				uint32_t global_y = nes->ppu.scroll_y                                    + sprite_y;
