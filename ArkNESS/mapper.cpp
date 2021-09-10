@@ -156,6 +156,7 @@ void mapper1_reset(nessys_t* nes)
 	mapper1_update_name_tbl_map(nes);
 	mapper1_update_prg_map(nes);
 	mapper1_update_chr_map(nes);
+	nes->mapper_flags |= NESSYS_MAPPER_FLAG_DATA_FROM_SOURCE;
 }
 
 bool mapper1_write(nessys_t* nes, uint16_t addr, uint8_t data)
@@ -530,6 +531,7 @@ void mapper69_reset(nessys_t* nes)
 bool nessys_init_mapper(nessys_t* nes)
 {
 	bool success = true;
+	nes->mapper_flags = 0;
 	switch (nes->mapper_id) {
 	case 0:
 		nes->mapper_write = mapper_write_null;

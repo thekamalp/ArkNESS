@@ -56,10 +56,10 @@ bool ines_load_cart(nessys_t* nes, FILE* fh)
 		nes->ppu.chr_rom_base = (uint8_t*)malloc(nes->ppu.chr_rom_size);
 		if (nes->ppu.chr_rom_base == NULL) return false;
 		fread(nes->ppu.chr_rom_base, 0x2000, hdr.chr_rom_size, fh);
-	} else if (hdr.flags11 & 0xf) {
-		nes->ppu.chr_ram_size = 64 << (hdr.flags11 & 0xf);
-		nes->ppu.chr_ram_base = (uint8_t*)malloc(nes->ppu.chr_ram_size);
-		if (nes->ppu.chr_ram_base == NULL) return false;
+	//} else if (hdr.flags11 & 0xf) {
+	//	nes->ppu.chr_ram_size = 64 << (hdr.flags11 & 0xf);
+	//	nes->ppu.chr_ram_base = (uint8_t*)malloc(nes->ppu.chr_ram_size);
+	//	if (nes->ppu.chr_ram_base == NULL) return false;
 	} else {
 		nes->ppu.chr_ram_size = 0x2000;  // 8KB of ram
 		nes->ppu.chr_ram_base = (uint8_t*)malloc(nes->ppu.chr_ram_size);

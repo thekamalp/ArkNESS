@@ -219,6 +219,8 @@ const uint16_t NESSYS_APU_NOISE_PERIOD_TABLE[16] = { 4, 8, 16, 32, 64, 96, 128, 
 
 const uint16_t NESSYS_APU_DMC_PERIOD_TABLE[16] = { 428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128, 106, 84, 72, 54 };
 
+const uint8_t NESSYS_MAPPER_FLAG_DATA_FROM_SOURCE = 0x01;
+
 struct nessys_apu_envelope_t {
 	uint8_t volume;
 	uint8_t divider;
@@ -329,7 +331,8 @@ struct nessys_t {
 	int32_t scanline_cycle;  // cycles after the start of current scanline
 	uint32_t cpu_cycle_inc;
 	uint8_t in_nmi;
-	uint8_t pad0[3];
+	uint8_t mapper_flags;
+	uint8_t pad0[2];
 	nessys_cpu_regs_t reg;
 	nessys_apu_regs_t apu;
 	nessys_ppu_t ppu;

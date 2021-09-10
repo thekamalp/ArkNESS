@@ -1251,6 +1251,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					}
 				} else {
 					rom_write = true;
+					if (nes->mapper_flags & NESSYS_MAPPER_FLAG_DATA_FROM_SOURCE) result = *operand;
 					//printf("writing to rom area a=0x%x d=0x%x\n", addr, (uint8_t) result);
 				}
 				break;
@@ -1425,6 +1426,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					}
 				} else {
 					rom_write = true;
+					if (nes->mapper_flags & NESSYS_MAPPER_FLAG_DATA_FROM_SOURCE) result = *operand;
 					//printf("writing to rom area a=0x%x d=0x%x\n", addr, (uint8_t)result);
 				}
 				break;
@@ -1479,6 +1481,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					}
 				} else {
 					rom_write = true;
+					if (nes->mapper_flags & NESSYS_MAPPER_FLAG_DATA_FROM_SOURCE) result = *operand;
 					//printf("writing to rom area a=0x%x d=0x%x\n", addr, (uint8_t)result);
 				}
 				break;
@@ -1564,6 +1567,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					}
 				} else {
 					rom_write = true;
+					if (nes->mapper_flags & NESSYS_MAPPER_FLAG_DATA_FROM_SOURCE) result = *operand;
 					//printf("writing to rom area a=0x%x d=0x%x\n", addr, (uint8_t)result);
 				}
 				break;
@@ -1628,6 +1632,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					}
 				} else {
 					rom_write = true;
+					if (nes->mapper_flags & NESSYS_MAPPER_FLAG_DATA_FROM_SOURCE) result = *operand;
 					//printf("writing to rom area a=0x%x d=0x%x\n", addr, (uint8_t)result);
 				}
 				break;
@@ -1659,6 +1664,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					}
 				} else {
 					rom_write = true;
+					if (nes->mapper_flags & NESSYS_MAPPER_FLAG_DATA_FROM_SOURCE) result = *operand;
 					//printf("writing to rom area a=0x%x d=0x%x\n", addr, (uint8_t)result);
 				}
 				break;
