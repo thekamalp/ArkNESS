@@ -809,6 +809,22 @@ void K2CALLBACK nessys_display(void* ptr)
 
 }
 
+uint8_t nessys_masked_joypad(uint8_t joypad)
+{
+	// this function takes the current joypad state, and masks off the up/down keys if they are both pressed
+	// and also does the same for the left/right keys
+	uint8_t result = joypad;
+	if ((result & (NESSYS_STD_CONTROLLER_BUTTON_UP_MASK | NESSYS_STD_CONTROLLER_BUTTON_DOWN_MASK)) ==
+		(NESSYS_STD_CONTROLLER_BUTTON_UP_MASK | NESSYS_STD_CONTROLLER_BUTTON_DOWN_MASK)) {
+		result &= ~(NESSYS_STD_CONTROLLER_BUTTON_UP_MASK | NESSYS_STD_CONTROLLER_BUTTON_DOWN_MASK);
+	}
+	if ((result & (NESSYS_STD_CONTROLLER_BUTTON_LEFT_MASK | NESSYS_STD_CONTROLLER_BUTTON_RIGHT_MASK)) ==
+		(NESSYS_STD_CONTROLLER_BUTTON_LEFT_MASK | NESSYS_STD_CONTROLLER_BUTTON_RIGHT_MASK)) {
+		result &= ~(NESSYS_STD_CONTROLLER_BUTTON_LEFT_MASK | NESSYS_STD_CONTROLLER_BUTTON_RIGHT_MASK);
+	}
+	return result;
+}
+
 void K2CALLBACK nessys_keyboard(void* ptr, k2key k, k2char c, k2keystate state)
 {
 	nessys_t* nes = (nessys_t*)ptr;
@@ -850,8 +866,8 @@ void K2CALLBACK nessys_keyboard(void* ptr, k2key k, k2char c, k2keystate state)
 			nes->apu.joypad[0] |= key_mask;
 		}
 		if (nes->apu.joy_control & 0x1) {
-			nes->apu.latched_joypad[0] = nes->apu.joypad[0];
-			nes->apu.latched_joypad[1] = nes->apu.joypad[1];
+			nes->apu.latched_joypad[0] = nessys_masked_joypad(nes->apu.joypad[0]);
+			nes->apu.latched_joypad[1] = nessys_masked_joypad(nes->apu.joypad[1]);
 		}
 	}
 }
@@ -988,6 +1004,9 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 	uint8_t skip_print = 0;
 	bool ppu_write, apu_write, rom_write;
 	uint8_t data_change;  // when writing to addressable memory, indicates which bits changed
+	uint8_t reset_ppu_status_after_nmi = 0;
+	nes->ppu.reg[2] &= 0x1F;
+	nes->ppu.reg[2] |= nes->ppu.status;
 	while (!done) {
 		pc_ptr = nessys_mem(nes, nes->reg.pc, &bank, &offset);
 		op = &C6502_OP_CODE[*pc_ptr];
@@ -999,6 +1018,9 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 		addr = 0x0;  // just a defulat address, if not used
 		// perform addressing operation to get operand
 		bank = 0;
+		if (nes->reg.pc == 0x8041) {
+			overflow = 0;
+		}
 		switch (op->addr) {
 		case C6502_ADDR_NONE:
 			break;
@@ -1112,6 +1134,8 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				nes->reg.pc = *((uint16_t*) nessys_mem(nes, NESSYS_NMI_VECTOR, &bank, &offset));
 				nes->reg.p |= C6502_P_I;
 				nes->in_nmi++;
+				nes->ppu.old_status  = (nes->ppu.status & 0xe0);
+				nes->ppu.old_status |= (nes->ppu.reg[2] & 0x1f);
 
 				cycle_count += NESSYS_PPU_PER_CPU_CLK * (7);
 				// cycles remaining may go negative if we don't have enough to cover the NMI
@@ -1178,9 +1202,9 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				if (offset >= NESSYS_APU_JOYPAD0_OFFSET && offset <= NESSYS_APU_JOYPAD1_OFFSET) {
 					uint8_t j = offset - NESSYS_APU_JOYPAD0_OFFSET;
 					nes->apu.reg[offset] = nes->apu.latched_joypad[j] & 0x1;
-					if ((nes->apu.joy_control & 0x1) == 0x0) {
-						nes->apu.latched_joypad[j] >>= 1;
-					}
+					//if ((nes->apu.joy_control & 0x1) == 0x0) {
+					//	nes->apu.latched_joypad[j] >>= 1;
+					//}
 				} else if (offset == NESSYS_APU_STATUS_OFFSET) {
 					nes->apu.reg[NESSYS_APU_STATUS_OFFSET] &= 0xc0;
 					nes->apu.reg[NESSYS_APU_STATUS_OFFSET] |= (nes->apu.pulse[0].length) ? 0x1 : 0x0;
@@ -1674,7 +1698,11 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				nes->reg.s++; nes->reg.p =  *(operand + nes->reg.s) | C6502_P_U | C6502_P_B;
 				nes->reg.s++; nes->reg.pc = *(operand + nes->reg.s);
 				nes->reg.s++; nes->reg.pc |= ((uint16_t) *(operand + nes->reg.s)) << 8;
-				if (nes->in_nmi) nes->in_nmi--;
+				if (nes->in_nmi) {
+					nes->in_nmi--;
+					nes->ppu.reg[2] = nes->ppu.old_status;
+					reset_ppu_status_after_nmi = 3;
+				}
 				//printf("-----------------------------------> Return Interrupt to 0x%x, stack 0x%x\n", nes->reg.pc, nes->reg.s);
 				break;
 			case C6502_INS_RTS:
@@ -1837,6 +1865,14 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				break;
 			}
 
+			if (reset_ppu_status_after_nmi) {
+				reset_ppu_status_after_nmi--;
+				if (reset_ppu_status_after_nmi == 0) {
+					nes->ppu.reg[2] &= 0x1F;
+					nes->ppu.reg[2] |= nes->ppu.status;
+				}
+			}
+
 			skip_print = 1;
 			if (bank == NESSYS_PPU_REG_START_BANK) {
 				switch (offset) {
@@ -1983,8 +2019,8 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					break;
 				case NESSYS_APU_JOYPAD0_OFFSET:
 					if (nes->apu.joy_control & 0x1) {
-						nes->apu.latched_joypad[0] = nes->apu.joypad[0];
-						nes->apu.latched_joypad[1] = nes->apu.joypad[1];
+						nes->apu.latched_joypad[0] = nessys_masked_joypad(nes->apu.joypad[0]);
+						nes->apu.latched_joypad[1] = nessys_masked_joypad(nes->apu.joypad[1]);
 					}
 					break;
 				case NESSYS_APU_FRAME_COUNTER_OFFSET:
@@ -1994,13 +2030,22 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					break;
 				}
 			} else {
-				switch(offset) {
-				case NESSYS_APU_STATUS_OFFSET:
-					if (nes->frame_irq_cycles == 1) {
-						nes->frame_irq_cycles = 0;
-						nes->apu.reg[NESSYS_APU_STATUS_OFFSET] &= ~0x40;
+				if (bank == NESSYS_APU_REG_START_BANK) {
+					switch (offset) {
+					case NESSYS_APU_STATUS_OFFSET:
+						if (nes->frame_irq_cycles == 1) {
+							nes->frame_irq_cycles = 0;
+							nes->apu.reg[NESSYS_APU_STATUS_OFFSET] &= ~0x40;
+						}
+						break;
+					case NESSYS_APU_JOYPAD0_OFFSET:
+					case NESSYS_APU_JOYPAD1_OFFSET:
+						uint8_t j = offset - NESSYS_APU_JOYPAD0_OFFSET;
+						if ((nes->apu.joy_control & 0x1) == 0x0) {
+							nes->apu.latched_joypad[j] >>= 1;
+						}
+						break;
 					}
-					break;
 				}
 			}
 			if (ppu_write) {

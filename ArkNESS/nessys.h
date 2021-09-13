@@ -306,6 +306,7 @@ struct nessys_ppu_t {
 	uint8_t oam[NESSYS_PPU_OAM_SIZE];
 	uint8_t pal[NESSYS_PPU_PAL_SIZE];
 	bool name_tbl_vert_mirror;
+	uint8_t old_status;
 	uint32_t chr_rom_size;
 	uint32_t chr_ram_size;
 	uint8_t* chr_rom_base;
