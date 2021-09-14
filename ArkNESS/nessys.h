@@ -338,6 +338,7 @@ struct nessys_t {
 	nessys_apu_regs_t apu;
 	nessys_ppu_t ppu;
 	uint32_t prg_rom_size;
+	uint32_t prg_ram_size;
 	uint8_t sysmem[NESSYS_RAM_SIZE];
 	uint8_t* prg_rom_base;
 	uint8_t* prg_ram_base;

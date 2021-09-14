@@ -67,7 +67,7 @@ void mapper1_update_prg_map(nessys_t* nes)
 	case 0x0:
 	case 0x4:
 		// single 32KB bank
-		offset = (m1_data->prg_bank & 0xe) << MAPPER1_PRG_BANK_SIZE_LOG2;
+		offset = (m1_data->prg_bank & 0x1e) << MAPPER1_PRG_BANK_SIZE_LOG2;
 		for(b = NESSYS_PRG_ROM_START_BANK; b < NESSYS_PRG_NUM_BANKS; b++) {
 			nes->prg_rom_bank[b] = nes->prg_rom_base + offset;
 			nes->prg_rom_bank_mask[b] = NESSYS_PRG_MEM_MASK;
@@ -79,13 +79,16 @@ void mapper1_update_prg_map(nessys_t* nes)
 		// first 16KB of addr space fixed to first 16KB in cart
 		// second 16KB programmable
 		offset = 0x0;
+		if (nes->prg_rom_size >= 0x40000) {
+			offset = (m1_data->prg_bank & 0x10) ? 0x40000 : 0x0;
+		}
 		for (b = NESSYS_PRG_ROM_START_BANK; b < HALF_BANK; b++) {
 			nes->prg_rom_bank[b] = nes->prg_rom_base + offset;
 			nes->prg_rom_bank_mask[b] = NESSYS_PRG_MEM_MASK;
 			offset += NESSYS_PRG_BANK_SIZE;
 			if (offset >= nes->prg_rom_size) offset &= ~MAPPER1_PRG_BANK_MASK;
 		}
-		offset = (m1_data->prg_bank & 0xf) << MAPPER1_PRG_BANK_SIZE_LOG2;
+		offset = (m1_data->prg_bank & 0x1f) << MAPPER1_PRG_BANK_SIZE_LOG2;
 		for (b = HALF_BANK; b < NESSYS_PRG_NUM_BANKS; b++) {
 			nes->prg_rom_bank[b] = nes->prg_rom_base + offset;
 			nes->prg_rom_bank_mask[b] = NESSYS_PRG_MEM_MASK;
@@ -96,7 +99,7 @@ void mapper1_update_prg_map(nessys_t* nes)
 	case 0xc:
 		// first 16KB programmable
 		// second 16KB of addr space fixed to last 16KB in cart
-		offset = (m1_data->prg_bank & 0xf) << MAPPER1_PRG_BANK_SIZE_LOG2;
+		offset = (m1_data->prg_bank & 0x1f) << MAPPER1_PRG_BANK_SIZE_LOG2;
 		for (b = NESSYS_PRG_ROM_START_BANK; b < HALF_BANK; b++) {
 			nes->prg_rom_bank[b] = nes->prg_rom_base + offset;
 			nes->prg_rom_bank_mask[b] = NESSYS_PRG_MEM_MASK;
@@ -104,6 +107,9 @@ void mapper1_update_prg_map(nessys_t* nes)
 			if (offset >= nes->prg_rom_size) offset &= ~MAPPER1_PRG_BANK_MASK;
 		}
 		offset = nes->prg_rom_size - 0x4000;
+		if (nes->prg_rom_size >= 0x40000) {
+			if ((m1_data->prg_bank & 0x10) == 0x0) offset = 0x40000 - 0x4000;
+		}
 		for (b = HALF_BANK; b < NESSYS_PRG_NUM_BANKS; b++) {
 			nes->prg_rom_bank[b] = nes->prg_rom_base + offset;
 			nes->prg_rom_bank_mask[b] = NESSYS_PRG_MEM_MASK;
@@ -112,6 +118,8 @@ void mapper1_update_prg_map(nessys_t* nes)
 		}
 		break;
 	}
+	offset = (m1_data->prg_ram_bank << MAPPER1_PRG_BANK_SIZE_LOG2);
+	nes->prg_rom_bank[NESSYS_PRG_RAM_START_BANK] = nes->prg_ram_base + offset;
 }
 
 void mapper1_update_chr_map(nessys_t* nes)
@@ -162,6 +170,7 @@ void mapper1_reset(nessys_t* nes)
 bool mapper1_write(nessys_t* nes, uint16_t addr, uint8_t data)
 {
 	uint16_t max_prg_rom_bank_offset = (nes->prg_rom_size >> MAPPER1_PRG_BANK_SIZE_LOG2) + ((nes->prg_rom_size & MAPPER1_PRG_BANK_MASK) ? 1 : 0);
+	uint16_t max_prg_ram_bank_offset = (nes->prg_ram_size >> MAPPER1_PRG_BANK_SIZE_LOG2) + ((nes->prg_ram_size & MAPPER1_PRG_BANK_MASK) ? 1 : 0);
 	uint16_t max_chr_rom_bank_offset = (nes->ppu.chr_rom_size >> MAPPER1_CHR_BANK_SIZE_LOG2) + ((nes->ppu.chr_rom_size & MAPPER1_CHR_BANK_MASK) ? 1 : 0);
 	if (max_chr_rom_bank_offset == 0) max_chr_rom_bank_offset = (nes->ppu.chr_ram_size >> MAPPER1_CHR_BANK_SIZE_LOG2) + ((nes->ppu.chr_ram_size & MAPPER1_CHR_BANK_MASK) ? 1 : 0);
 	uint8_t data_changed = 0x0;
@@ -182,17 +191,45 @@ bool mapper1_write(nessys_t* nes, uint16_t addr, uint8_t data)
 				mapper1_update_chr_map(nes);
 				break;
 			case MAPPER1_ADDR_CHR_BANK0:
-				data_changed = (m1_data->chr_bank0 ^ m1_data->shift_reg) & 0x1f;
+				data_changed = m1_data->chr_bank0;
 				m1_data->chr_bank0 = m1_data->shift_reg % max_chr_rom_bank_offset;
+				if (nes->ppu.chr_ram_size == 0x2000) {
+					if (m1_data->control & 0x10) {
+						m1_data->chr_bank0 &= ~0x1;
+						m1_data->chr_bank1 |= 0x1;
+					}
+					m1_data->prg_ram_bank = ((m1_data->shift_reg >> 2) & 0x3) % max_prg_ram_bank_offset;
+					if (max_prg_rom_bank_offset >= 0x20) {
+						m1_data->prg_bank &= ~0x10;
+						m1_data->prg_bank |= m1_data->shift_reg & 0x10;
+						mapper1_update_prg_map(nes);
+					}
+				}
+				data_changed ^= m1_data->chr_bank0;
 				mapper1_update_chr_map(nes);
 				break;
 			case MAPPER1_ADDR_CHR_BANK1:
-				data_changed = (m1_data->chr_bank1 ^ m1_data->shift_reg) & 0x1f;
+				data_changed = m1_data->chr_bank1;
 				m1_data->chr_bank1 = m1_data->shift_reg % max_chr_rom_bank_offset;
+				if (nes->ppu.chr_ram_size == 0x2000) {
+					if (m1_data->control & 0x10) {
+						m1_data->chr_bank0 &= ~0x1;
+						m1_data->chr_bank1 |= 0x1;
+					} else {
+						m1_data->prg_ram_bank = ((m1_data->shift_reg >> 2) & 0x3) % max_prg_ram_bank_offset;
+						if (max_prg_rom_bank_offset >= 0x20) {
+							m1_data->prg_bank &= ~0x10;
+							m1_data->prg_bank |= m1_data->shift_reg & 0x10;
+							mapper1_update_prg_map(nes);
+						}
+					}
+				}
+				data_changed ^= m1_data->chr_bank1;
 				mapper1_update_chr_map(nes);
 				break;
 			case MAPPER1_ADDR_PRG_BANK:
-				m1_data->prg_bank = m1_data->shift_reg % max_prg_rom_bank_offset;
+				m1_data->prg_bank &= 0x10;
+				m1_data->prg_bank |= (m1_data->shift_reg & 0xf) % max_prg_rom_bank_offset;
 				mapper1_update_prg_map(nes);
 				break;
 			}

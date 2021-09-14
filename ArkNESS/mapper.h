@@ -32,6 +32,7 @@ struct mapper1_data {
 	uint8_t chr_bank0;
 	uint8_t chr_bank1;
 	uint8_t prg_bank;
+	uint8_t prg_ram_bank;
 };
 
 // ------------------------------------------------------------

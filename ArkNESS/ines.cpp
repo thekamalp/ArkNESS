@@ -48,7 +48,10 @@ bool ines_load_cart(nessys_t* nes, FILE* fh)
 	}
 	uint32_t ram_size = (nes2) ? ((hdr.flags10 & 0xf) ? 64 << (hdr.flags10 & 0xf) : 0) :
 		((hdr.prg_ram_size) ? hdr.prg_ram_size * 0x2000 : 0x2000);
-	nes->prg_ram_base = (uint8_t*)malloc(ram_size);
+	if (ram_size) {
+		nes->prg_ram_size = ram_size;
+		nes->prg_ram_base = (uint8_t*)malloc(ram_size);
+	}
 	if (hdr.chr_rom_size) {
 		nes->ppu.chr_rom_size = hdr.chr_rom_size;
 		if (nes2) nes->ppu.chr_rom_size |= (hdr.flags9 & 0xf0) << 4;

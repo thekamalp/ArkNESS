@@ -1018,9 +1018,6 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 		addr = 0x0;  // just a defulat address, if not used
 		// perform addressing operation to get operand
 		bank = 0;
-		if (nes->reg.pc == 0x8041) {
-			overflow = 0;
-		}
 		switch (op->addr) {
 		case C6502_ADDR_NONE:
 			break;
@@ -1354,7 +1351,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				}
 				break;
 			case C6502_INS_BRK:
-				printf("----------------------------------> BRK\n");
+				//printf("----------------------------------> BRK\n");
 				// get the stack base
 				operand = nessys_mem(nes, 0x100, &bank, &offset);
 				*(operand + nes->reg.s) = nes->reg.pc >> 8;   nes->reg.s--;
