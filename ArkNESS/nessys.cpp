@@ -1064,14 +1064,14 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 			break;
 		case C6502_ADDR_ABSOLUTE_X:
 			addr = *nessys_mem(nes, nes->reg.pc + 1, &bank, &offset);
-			penalty_cycles += (addr + nes->reg.x >= 0x100);
+			penalty_cycles += (addr + nes->reg.x >= 0x100) * op->penalty_cycles;
 			addr |= ((uint16_t)*nessys_mem(nes, nes->reg.pc + 2, &bank, &offset)) << 8;
 			addr += nes->reg.x;
 			operand = nessys_mem(nes, addr, &bank, &offset);
 			break;
 		case C6502_ADDR_ABSOLUTE_Y:
 			addr = *nessys_mem(nes, nes->reg.pc + 1, &bank, &offset);
-			penalty_cycles += (addr + nes->reg.y >= 0x100);
+			penalty_cycles += (addr + nes->reg.y >= 0x100) * op->penalty_cycles;
 			addr |= ((uint16_t)*nessys_mem(nes, nes->reg.pc + 2, &bank, &offset)) << 8;
 			addr += nes->reg.y;
 			operand = nessys_mem(nes, addr, &bank, &offset);
@@ -1089,7 +1089,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 		case C6502_ADDR_INDIRECT_Y:
 			indirect_addr = *nessys_mem(nes, nes->reg.pc + 1, &bank, &offset);
 			addr = *nessys_mem(nes, indirect_addr, &bank, &offset);
-			penalty_cycles += (addr + nes->reg.y >= 0x100);
+			penalty_cycles += (addr + nes->reg.y >= 0x100) * op->penalty_cycles;
 			indirect_addr++;
 			indirect_addr &= 0xFF;
 			addr |= ((uint16_t)*nessys_mem(nes, indirect_addr, &bank, &offset)) << 8;
@@ -1113,8 +1113,8 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 
 		uint32_t instruction_cycles = (NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles));
 		bool mapper_irq = (nes->mapper_irq_cycles > 0 && nes->mapper_irq_cycles < instruction_cycles);
-		bool frame_irq = (nes->frame_irq_cycles > 0 && nes->frame_irq_cycles < instruction_cycles);
-		bool dmc_irq = (nes->dmc_irq_cycles > 0 && nes->dmc_irq_cycles < instruction_cycles);
+		bool frame_irq = false;// (nes->frame_irq_cycles > 0 && nes->frame_irq_cycles < instruction_cycles);
+		bool dmc_irq = false;// (nes->dmc_irq_cycles > 0 && nes->dmc_irq_cycles < instruction_cycles);
 		bool irq_interrupt = mapper_irq;// || frame_irq || dmc_irq;
 		if (nes->cycles_remaining < (int32_t)instruction_cycles || vblank_interrupt) {
 			done = !vblank_interrupt;
