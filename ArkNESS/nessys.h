@@ -105,6 +105,8 @@ const uint32_t NESSYS_PPU_SCANLINES_VBLANK_CLKS = NESSYS_PPU_SCANLINES_VBLANK * 
 const uint32_t NESSYS_PPU_SCANLINES_PRE_RENDER_CLKS = NESSYS_PPU_SCANLINES_PRE_RENDER * NESSYS_PPU_CLK_PER_SCANLINE;
 const uint32_t NESSYS_PPU_SCANLINES_PER_FRAME_CLKS = NESSYS_PPU_SCANLINES_PER_FRAME * NESSYS_PPU_CLK_PER_SCANLINE;
 
+const uint8_t NESSYS_PPU_MAX_SPRITES_PER_SCALINE = 8;
+
 // 64x3 component entry palette, in float
 const float NESSYS_PPU_PALETTE[] = {
 	 84/255.0f,  84/255.0f,  84/255.0f,    0/255.0f,  30/255.0f, 116/255.0f,    8/255.0f,  16/255.0f, 144/255.0f,   48/255.0f,   0/255.0f, 136/255.0f,   68/255.0f,   0/255.0f, 100/255.0f,   92/255.0f,   0/255.0f,  48/255.0f,   84/255.0f,   4/255.0f,   0/255.0f,   60/255.0f,  24/255.0f,   0/255.0f,   32/255.0f,  42/255.0f,   0/255.0f,    8/255.0f,  58/255.0f,   0/255.0f,    0/255.0f,  64/255.0f,   0/255.0f,    0/255.0f,  60/255.0f,   0/255.0f,    0/255.0f,  50/255.0f,  60/255.0f,    0/255.0f,   0/255.0f,   0/255.0f,    0/255.0f,   0/255.0f,   0/255.0f,    0/255.0f,   0/255.0f,   0/255.0f,
@@ -314,6 +316,15 @@ struct nessys_ppu_t {
 	uint16_t chr_rom_bank_mask[NESSYS_CHR_NUM_BANKS];
 	uint8_t* chr_rom_bank[NESSYS_CHR_NUM_BANKS];
 	uint8_t* mem_4screen;
+	uint8_t scanline_num_sprites[NESSYS_PPU_SCANLINES_RENDERED];
+	uint8_t scanline_sprite_id[NESSYS_PPU_SCANLINES_RENDERED][NESSYS_PPU_MAX_SPRITES_PER_SCALINE];
+};
+
+const uint32_t NESSYS_NUM_CPU_BACKTRACE_ENTRIES = 128;
+struct nessys_cpu_backtrace_t {
+	int32_t scanline;
+	int32_t scanline_cycle;
+	nessys_cpu_regs_t reg;
 };
 
 struct nessys_t {
@@ -344,6 +355,8 @@ struct nessys_t {
 	uint8_t* prg_ram_base;
 	uint16_t prg_rom_bank_mask[NESSYS_PRG_NUM_BANKS];
 	uint8_t* prg_rom_bank[NESSYS_PRG_NUM_BANKS];
+	uint32_t backtrace_entry;
+	nessys_cpu_backtrace_t backtrace[NESSYS_NUM_CPU_BACKTRACE_ENTRIES];
 	// rendering data structures
 	k2win* win;
 	k2gfx* gfx;

@@ -1,0 +1,2 @@
+ffb5 - turn off background
+f46a/f477 - write dmc

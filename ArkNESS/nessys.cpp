@@ -495,6 +495,23 @@ void nessys_gen_sound(nessys_t* nes)
 	}
 }
 
+void nessys_gen_scanline_sprite_map(nessys_ppu_t* ppu)
+{
+	uint32_t sp, row_start, row_offset, row;
+	uint32_t sprite_height = (ppu->reg[0] & 0x20) ? 16 : 8;
+	memset(ppu->scanline_num_sprites, 0, NESSYS_PPU_SCANLINES_RENDERED);
+	for (sp = 0; sp < NESSYS_PPU_SPRITE_SIZE * NESSYS_PPU_NUM_SPRITES; sp += NESSYS_PPU_SPRITE_SIZE) {
+		row_start = ppu->oam[sp + 0];
+		for (row_offset = 0; row_offset < sprite_height; row_offset++) {
+			row = row_start + row_offset;
+			if (ppu->scanline_num_sprites[row] < NESSYS_PPU_MAX_SPRITES_PER_SCALINE && row < NESSYS_PPU_SCANLINES_RENDERED) {
+				ppu->scanline_sprite_id[row][ppu->scanline_num_sprites[row]] = sp;
+				ppu->scanline_num_sprites[row]++;
+			}
+		}
+	}
+}
+
 void K2CALLBACK nessys_display(void* ptr)
 {
 	nessys_t* nes = (nessys_t*)ptr;
@@ -799,6 +816,9 @@ void K2CALLBACK nessys_display(void* ptr)
 			}
 		}
 
+		// need to only do this if sprtes have changed position
+		nessys_gen_scanline_sprite_map(&(nes->ppu));
+
 		cycles = nessys_exec_cpu_cycles(nes, 0);
 		//printf("executed %d cycles; cycles remaining %d\n", cycles, nes->cycles_remaining);
 	} while (nes->cycles_remaining > 100);
@@ -985,6 +1005,31 @@ void nessys_default_memmap(nessys_t* nes)
 	}
 }
 
+void nessys_add_backtrace(nessys_t* nes)
+{
+	nessys_cpu_backtrace_t* bt = &(nes->backtrace[nes->backtrace_entry]);
+	bt->scanline = nes->scanline;
+	bt->scanline_cycle = nes->scanline_cycle;
+	bt->reg = nes->reg;
+	nes->backtrace_entry++;
+	nes->backtrace_entry %= NESSYS_NUM_CPU_BACKTRACE_ENTRIES;
+}
+
+void nessys_dump_backtrace(nessys_t* nes)
+{
+	printf("backtrace\n");
+	nessys_cpu_backtrace_t* bt;
+	uint32_t entry = nes->backtrace_entry;
+	uint32_t i;
+	for (i = 0; i < NESSYS_NUM_CPU_BACKTRACE_ENTRIES; i++) {
+		bt = &(nes->backtrace[entry]);
+		printf("%d: scan/cycle: %d/%d pc: 0x%x a: 0x%x x: 0x%x y: 0x%x s: 0x%X p: 0x%x\n",
+			i, bt->scanline, bt->scanline_cycle, bt->reg.pc, bt->reg.a, bt->reg.x, bt->reg.y, bt->reg.s, bt->reg.p);
+		entry++;
+		entry %= NESSYS_NUM_CPU_BACKTRACE_ENTRIES;
+	}
+}
+
 uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 {
 	uint32_t cycle_count = 0;
@@ -1005,6 +1050,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 	bool ppu_write, apu_write, rom_write;
 	uint8_t data_change;  // when writing to addressable memory, indicates which bits changed
 	uint8_t reset_ppu_status_after_nmi = 0;
+	int32_t next_scanline_cycle = 0;
 	nes->ppu.reg[2] &= 0x1F;
 	nes->ppu.reg[2] |= nes->ppu.status;
 	while (!done) {
@@ -1115,7 +1161,8 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 		bool mapper_irq = (nes->mapper_irq_cycles > 0 && nes->mapper_irq_cycles < instruction_cycles);
 		bool frame_irq = false;// (nes->frame_irq_cycles > 0 && nes->frame_irq_cycles < instruction_cycles);
 		bool dmc_irq = false;// (nes->dmc_irq_cycles > 0 && nes->dmc_irq_cycles < instruction_cycles);
-		bool irq_interrupt = mapper_irq;// || frame_irq || dmc_irq;
+		bool irq_interrupt = !(nes->reg.p & C6502_P_I) && mapper_irq;// || frame_irq || dmc_irq;
+		nes->cpu_cycle_inc = 0;
 		if (nes->cycles_remaining < (int32_t)instruction_cycles || vblank_interrupt) {
 			done = !vblank_interrupt;
 			if (vblank_interrupt) {
@@ -1134,12 +1181,13 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				nes->ppu.old_status  = (nes->ppu.status & 0xe0);
 				nes->ppu.old_status |= (nes->ppu.reg[2] & 0x1f);
 
-				cycle_count += NESSYS_PPU_PER_CPU_CLK * (7);
-				// cycles remaining may go negative if we don't have enough to cover the NMI
-				nes->cycles_remaining -= NESSYS_PPU_PER_CPU_CLK * (7);
-				nes->cycle += NESSYS_PPU_PER_CPU_CLK * (7);
+				nes->cpu_cycle_inc = 7;
+				//cycle_count += NESSYS_PPU_PER_CPU_CLK * (7);
+				//// cycles remaining may go negative if we don't have enough to cover the NMI
+				//nes->cycles_remaining -= NESSYS_PPU_PER_CPU_CLK * (7);
+				//nes->cycle += NESSYS_PPU_PER_CPU_CLK * (7);
 			}
-		} else if( !(nes->reg.p & C6502_P_I) && irq_interrupt) {
+		} else if( irq_interrupt) {
 			// mapper interrupt
 			// get the stack base
 			operand = nessys_mem(nes, 0x100, &bank, &offset);
@@ -1159,10 +1207,11 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 			}
 
 			//printf("-----------------------------------> Mapper interrupt scanline: %d\n", nes->scanline);
-			cycle_count += NESSYS_PPU_PER_CPU_CLK * (7);
-			// cycles remaining may go negative if we don't have enough to cover the NMI
-			nes->cycles_remaining -= NESSYS_PPU_PER_CPU_CLK * (7);
-			nes->cycle += NESSYS_PPU_PER_CPU_CLK* (7);
+			nes->cpu_cycle_inc = 7;
+			//cycle_count += NESSYS_PPU_PER_CPU_CLK * (7);
+			//// cycles remaining may go negative if we don't have enough to cover the NMI
+			//nes->cycles_remaining -= NESSYS_PPU_PER_CPU_CLK * (7);
+			//nes->cycle += NESSYS_PPU_PER_CPU_CLK* (7);
 		} else {
 			skip_print = 1;
 			if (skip_print == 0) {
@@ -1175,6 +1224,9 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				if (skip_print < op->num_bytes) skip_print = 0;
 				else skip_print -= op->num_bytes;
 			}
+
+			// add debug info
+			nessys_add_backtrace(nes);
 
 			// move up the program counter
 			nes->reg.pc += op->num_bytes;
@@ -2148,79 +2200,114 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				ppu_ever_written |= nes->mapper_write(nes, addr, (uint8_t)result);
 			}
 			nes->cpu_cycle_inc = op->num_cycles + penalty_cycles;
-			cycle_count += NESSYS_PPU_PER_CPU_CLK*(nes->cpu_cycle_inc);
-			// cycles remaining may go negative if we have a oam dma transfer
-			// the cycle penalty is accounted for until after th decision has already been bade to execute it
-			nes->cycles_remaining -= NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles);
-			nes->cycle += NESSYS_PPU_PER_CPU_CLK*(op->num_cycles + penalty_cycles);
-			nes->scanline_cycle += NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles);
-			if ((nes->ppu.reg[1] & 0x18) && (nes->scanline >= 0)) {
-				uint32_t a12_toggle_cycle;
-				switch (nes->ppu.reg[0] & 0x18) {
-				case 0x08:
-					a12_toggle_cycle = 260;
-					break;
-				case 0x10:
-					a12_toggle_cycle = 324;
-					break;
-				default:
-					a12_toggle_cycle = 1000;// that is, never
-					break;
-				}
-				if (nes->scanline_cycle < (int32_t) a12_toggle_cycle) {
-					nes->ppu.mem_addr &= ~0x1000;
+		}
+		cycle_count += NESSYS_PPU_PER_CPU_CLK*(nes->cpu_cycle_inc);
+		// cycles remaining may go negative if we have a oam dma transfer
+		// the cycle penalty is accounted for until after th decision has already been bade to execute it
+		nes->cycles_remaining -= NESSYS_PPU_PER_CPU_CLK * (nes->cpu_cycle_inc);
+		nes->cycle += NESSYS_PPU_PER_CPU_CLK*(nes->cpu_cycle_inc);
+		next_scanline_cycle = nes->scanline_cycle;
+		next_scanline_cycle += NESSYS_PPU_PER_CPU_CLK * (nes->cpu_cycle_inc);
+		if ((nes->ppu.reg[1] & 0x18) && (nes->scanline >= -1)) {// && (nes->scanline < NESSYS_PPU_SCANLINES_RENDERED)) {
+			//uint32_t a12_toggle_cycle;
+			//switch (nes->ppu.reg[0] & 0x18) {
+			//case 0x08:
+			//	a12_toggle_cycle = 260;
+			//	break;
+			//case 0x10:
+			//	a12_toggle_cycle = 324;
+			//	break;
+			//default:
+			//	a12_toggle_cycle = 1000;// that is, never
+			//	break;
+			//}
+			//if (nes->scanline_cycle < (int32_t) a12_toggle_cycle) {
+			//	nes->ppu.mem_addr &= ~0x1000;
+			//} else {
+			//	//if((nes->ppu.mem_addr & 0x1000) == 0) printf("a12_toggled: %d\n", nes->scanline_cycle);
+			//	nes->ppu.mem_addr |= 0x1000;
+			//}
+			nes->ppu.mem_addr &= ~0x1000;
+			if (nes->ppu.reg[0] & 0x20) {
+				// 8x16 sprites are more complex
+				if (next_scanline_cycle < 260) {
+					nes->ppu.mem_addr |= (nes->ppu.reg[0] & 0x10) << 8;
 				} else {
-					//if((nes->ppu.mem_addr & 0x1000) == 0) printf("a12_toggled: %d\n", nes->scanline_cycle);
-					nes->ppu.mem_addr |= 0x1000;
+					int32_t sp_cycle = (nes->scanline_cycle < 260) ? 260 : nes->scanline_cycle;
+					sp_cycle &= ~0x3;
+					sp_cycle |= next_scanline_cycle & 0x3;
+					int32_t sp_index;
+					while (sp_cycle <= next_scanline_cycle) {
+						sp_index = (sp_cycle - 260) / 4;
+						sp_cycle += 4;
+						if (nes->scanline >= 0 && nes->scanline < NESSYS_PPU_SCANLINES_RENDERED && sp_index < nes->ppu.scanline_num_sprites[nes->scanline]) {
+							uint8_t tile_index = nes->ppu.oam[nes->ppu.scanline_sprite_id[nes->scanline][sp_index] + 1];
+							nes->ppu.mem_addr |= (tile_index & 0x1) << 12;
+						} else {
+							// if there are fewer than 8 sprites, they fetch the last sprite
+							nes->ppu.mem_addr |= 0x1000;
+						}
+						if (sp_cycle < next_scanline_cycle) {
+							ppu_ever_written |= nes->mapper_update(nes);
+						}
+					}
+				}
+			} else {
+				// 8x8 sprites generally toggle once per scanline
+				if (next_scanline_cycle < 260 || next_scanline_cycle >= 324) {
+					nes->ppu.mem_addr |= (nes->ppu.reg[0] & 0x10) << 8;
+				} else {
+					nes->ppu.mem_addr |= (nes->ppu.reg[0] & 0x08) << 9;
 				}
 			}
-			ppu_ever_written |= nes->mapper_update(nes);
+		}
+		nes->scanline_cycle = next_scanline_cycle;
+		ppu_ever_written |= nes->mapper_update(nes);
+		if (nes->scanline_cycle >= (int32_t)NESSYS_PPU_CLK_PER_SCANLINE) {
+			//if (nes->scanline_cycle > (int32_t)2 * NESSYS_PPU_CLK_PER_SCANLINE)
+			//	printf("Large scanline cycle: %d, scanline %d cycles remaining %d\n", nes->scanline_cycle, nes->scanline, nes->cycles_remaining);
 			if (nes->scanline_cycle >= (int32_t)NESSYS_PPU_CLK_PER_SCANLINE) {
-				//if (nes->scanline_cycle > (int32_t)2 * NESSYS_PPU_CLK_PER_SCANLINE)
-				//	printf("Large scanline cycle: %d, scanline %d cycles remaining %d\n", nes->scanline_cycle, nes->scanline, nes->cycles_remaining);
-				while (nes->scanline_cycle >= (int32_t)NESSYS_PPU_CLK_PER_SCANLINE) {
-					nes->scanline_cycle -= NESSYS_PPU_CLK_PER_SCANLINE;
-					nes->scanline++;
-				}
-				//if (nes->scanline > 240) printf("scanline exceeded: %d %d %d\n", nes->scanline, nes->scanline_cycle, nes->cycles_remaining);
-				// if we are on positive scanline, the we are in the display portion of the frame
-				// if so, we are done if ppu had been written, and rnedering is enabled
-				done = (nes->scanline > 0) && ppu_ever_written && ((nes->ppu.reg[1] & 0x18) != 0x0) && (nes->scanline < NESSYS_PPU_SCANLINES_RENDERED);
+				nes->scanline_cycle -= NESSYS_PPU_CLK_PER_SCANLINE;
+				nes->scanline++;
 			}
-			if (nes->vblank_cycles > 0) {
-				if (nes->vblank_cycles <= NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles)) {
-					nes->vblank_cycles = 1;
-				} else {
-					nes->vblank_cycles -= NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles);
-				}
+			//if (nes->scanline > 240) printf("scanline exceeded: %d %d %d\n", nes->scanline, nes->scanline_cycle, nes->cycles_remaining);
+			// if we are on positive scanline, the we are in the display portion of the frame
+			// if so, we are done if ppu had been written, and rnedering is enabled
+			done = (nes->scanline > 0) && ppu_ever_written && ((nes->ppu.reg[1] & 0x18) != 0x0) && (nes->scanline < NESSYS_PPU_SCANLINES_RENDERED);
+		}
+		if (nes->vblank_cycles > 0) {
+			if (nes->vblank_cycles <= NESSYS_PPU_PER_CPU_CLK * (nes->cpu_cycle_inc)) {
+				nes->vblank_cycles = 1;
+			} else {
+				nes->vblank_cycles -= NESSYS_PPU_PER_CPU_CLK * (nes->cpu_cycle_inc);
 			}
-			if (nes->sprite0_hit_cycles > 0) {
-				if (nes->sprite0_hit_cycles <= NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles)) {
-					nes->sprite0_hit_cycles = 1;
-				} else {
-					nes->sprite0_hit_cycles -= NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles);
-				}
+		}
+		if (nes->sprite0_hit_cycles > 0) {
+			if (nes->sprite0_hit_cycles <= NESSYS_PPU_PER_CPU_CLK * (nes->cpu_cycle_inc)) {
+				nes->sprite0_hit_cycles = 1;
+			} else {
+				nes->sprite0_hit_cycles -= NESSYS_PPU_PER_CPU_CLK * (nes->cpu_cycle_inc);
 			}
-			if (nes->mapper_irq_cycles > 0) {
-				if (nes->mapper_irq_cycles <= NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles)) {
-					nes->mapper_irq_cycles = 1;
-				} else {
-					nes->mapper_irq_cycles -= NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles);
-				}
+		}
+		if (nes->mapper_irq_cycles > 0) {
+			if (nes->mapper_irq_cycles <= NESSYS_PPU_PER_CPU_CLK * (nes->cpu_cycle_inc)) {
+				nes->mapper_irq_cycles = 1;
+			} else {
+				nes->mapper_irq_cycles -= NESSYS_PPU_PER_CPU_CLK * (nes->cpu_cycle_inc);
 			}
-			if (nes->frame_irq_cycles > 0) {
-				if (nes->frame_irq_cycles <= NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles)) {
-					nes->frame_irq_cycles = 1;
-				} else {
-					nes->frame_irq_cycles -= NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles);
-				}
+		}
+		if (nes->frame_irq_cycles > 0) {
+			if (nes->frame_irq_cycles <= NESSYS_PPU_PER_CPU_CLK * (nes->cpu_cycle_inc)) {
+				nes->frame_irq_cycles = 1;
+			} else {
+				nes->frame_irq_cycles -= NESSYS_PPU_PER_CPU_CLK * (nes->cpu_cycle_inc);
 			}
-			if (nes->dmc_irq_cycles > 0) {
-				if (nes->dmc_irq_cycles <= NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles)) {
-					nes->dmc_irq_cycles = 1;
-				} else {
-					nes->dmc_irq_cycles -= NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles);
-				}
+		}
+		if (nes->dmc_irq_cycles > 0) {
+			if (nes->dmc_irq_cycles <= NESSYS_PPU_PER_CPU_CLK * (nes->cpu_cycle_inc)) {
+				nes->dmc_irq_cycles = 1;
+			} else {
+				nes->dmc_irq_cycles -= NESSYS_PPU_PER_CPU_CLK * (nes->cpu_cycle_inc);
 			}
 		}
 	}

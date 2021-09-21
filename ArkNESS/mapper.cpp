@@ -359,6 +359,7 @@ bool mapper4_write(nessys_t* nes, uint16_t addr, uint8_t data)
 		m4_data->irq_latch = data;
 		break;
 	case MAPPER4_ADDR_IRQ_RELOAD:
+		m4_data->irq_counter = 0;
 		m4_data->counter_write_pending = 1;
 		break;
 	case MAPPER4_ADDR_IRQ_DISABLE:
