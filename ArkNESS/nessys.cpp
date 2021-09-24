@@ -2270,10 +2270,12 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				nes->scanline_cycle -= NESSYS_PPU_CLK_PER_SCANLINE;
 				nes->scanline++;
 			}
-			//if (nes->scanline > 240) printf("scanline exceeded: %d %d %d\n", nes->scanline, nes->scanline_cycle, nes->cycles_remaining);
+			if (nes->scanline >= (int32_t) NESSYS_PPU_SCANLINES_RENDERED) {
+				nes->scanline -= NESSYS_PPU_SCANLINES_PER_FRAME;
+			}
 			// if we are on positive scanline, the we are in the display portion of the frame
 			// if so, we are done if ppu had been written, and rnedering is enabled
-			done = (nes->scanline > 0) && ppu_ever_written && ((nes->ppu.reg[1] & 0x18) != 0x0) && (nes->scanline < NESSYS_PPU_SCANLINES_RENDERED);
+			done |= (nes->scanline > 0) && ppu_ever_written && ((nes->ppu.reg[1] & 0x18) != 0x0) && (nes->scanline < NESSYS_PPU_SCANLINES_RENDERED);
 		}
 		if (nes->vblank_cycles > 0) {
 			if (nes->vblank_cycles <= NESSYS_PPU_PER_CPU_CLK * (nes->cpu_cycle_inc)) {
