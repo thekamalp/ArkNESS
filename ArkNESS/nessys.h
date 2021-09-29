@@ -278,7 +278,7 @@ struct nessys_apu_dmc_t {
 };
 
 struct nessys_apu_regs_t {
-	uint8_t reg[NESSYS_APU_SIZE];
+	uint8_t reg_mem[NESSYS_APU_SIZE];
 	uint8_t joy_control;
 	uint8_t frame_counter;
 	uint8_t status;
@@ -291,6 +291,7 @@ struct nessys_apu_regs_t {
 	nessys_apu_triangle_t triangle;
 	nessys_apu_noise_t noise;
 	nessys_apu_dmc_t dmc;
+	uint8_t* reg;
 };
 
 struct nessys_ppu_t {
@@ -299,8 +300,9 @@ struct nessys_ppu_t {
 	uint8_t status;
 	uint8_t max_y;
 	uint8_t scroll[2];
-	uint16_t mem_addr;
+	uint16_t pad;
 	uint16_t scroll_y;
+	uint16_t mem_addr;
 	uint16_t t_mem_addr;
 	uint8_t addr_toggle;
 	uint8_t scroll_y_changed;
@@ -329,6 +331,12 @@ struct nessys_cpu_backtrace_t {
 
 struct nessys_t {
 	uint32_t mapper_id;
+	bool (*mapper_bg_setup)(nessys_t* nes, uint32_t phase);
+	bool (*mapper_sprite_setup)(nessys_t* nes, uint32_t phase);
+	void (*mapper_cpu_setup)(nessys_t* nes);
+	void (*mapper_audio_tick)(nessys_t* nes);
+	int16_t(*mapper_gen_sound)(nessys_t* nes);
+	uint8_t* (*mapper_read)(nessys_t* nes, uint16_t addr);
 	bool (*mapper_write)(nessys_t* nes, uint16_t addr, uint8_t data);
 	bool (*mapper_update)(nessys_t* nes);
 	void* mapper_data;
@@ -355,6 +363,10 @@ struct nessys_t {
 	uint8_t* prg_ram_base;
 	uint16_t prg_rom_bank_mask[NESSYS_PRG_NUM_BANKS];
 	uint8_t* prg_rom_bank[NESSYS_PRG_NUM_BANKS];
+	int32_t scissor_left_x;
+	int32_t scissor_top_y;
+	int32_t scissor_right_x;
+	int32_t scissor_bottom_y;
 	uint32_t backtrace_entry;
 	nessys_cpu_backtrace_t backtrace[NESSYS_NUM_CPU_BACKTRACE_ENTRIES];
 	// rendering data structures
@@ -388,6 +400,18 @@ struct nessys_t {
 
 #include "c6502.h"
 #include "ines.h"
+
+void nessys_apu_env_tick(nessys_apu_envelope_t* envelope);
+void nessys_apu_tri_linear_tick(nessys_apu_triangle_t* triangle);
+void nessys_apu_tri_length_tick(nessys_apu_triangle_t* triangle);
+void nessys_apu_noise_length_tick(nessys_apu_noise_t* noise);
+void nessys_apu_sweep_tick(nessys_apu_pulse_t* pulse);
+void nessys_gen_sound(nessys_t* nes);
+
+uint8_t nessys_apu_gen_pulse(nessys_apu_pulse_t* pulse);
+uint8_t nessys_apu_gen_triangle(nessys_apu_triangle_t* triangle);
+uint8_t nessys_apu_gen_noise(nessys_apu_noise_t* noise);
+uint8_t nessys_apu_gen_dmc(nessys_t* nes);
 
 void nessys_init(nessys_t* nes);
 void nessys_power_cycle(nessys_t* nes);

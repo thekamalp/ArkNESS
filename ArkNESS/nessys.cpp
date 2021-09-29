@@ -10,6 +10,7 @@
 void nessys_init(nessys_t* nes)
 {
 	memset(nes, 0, sizeof(nessys_t));
+	nes->apu.reg = nes->apu.reg_mem;
 	nes->apu.pulse[0].env.flags = NESSYS_APU_PULSE_FLAG_SWEEP_ONES_COMP;
 	nes->apu.noise.shift_reg = 0x01;
 	k2image::k2Initialize();
@@ -380,6 +381,7 @@ int16_t nessys_gen_sound_sample(nessys_t* nes)
 			cur_frame_tick = 0;
 			nes->apu.frame_frac_counter &= NESSYS_SND_FRAME_FRAC_MASK;
 		}
+		nes->mapper_audio_tick(nes);
 		if (last_frame_tick < 4) {
 			nessys_apu_env_tick(&(nes->apu.pulse[0].env));
 			nessys_apu_env_tick(&(nes->apu.pulse[1].env));
@@ -404,6 +406,7 @@ int16_t nessys_gen_sound_sample(nessys_t* nes)
 		159.79f / (1.0f / ((triangle_sound / 8227.0f) + (noise_sound / 12241.0f) + (dmc_sound / 22638.0f))) : 0.0f;
 	float soundf = pulse_soundf + other_soundf;
 	int16_t sound = (int16_t)(16384.0f * (soundf - 0.5f));
+	sound += nes->mapper_gen_sound(nes);
 	return sound;
 }
 
@@ -588,70 +591,93 @@ void K2CALLBACK nessys_display(void* ptr)
 		nes->gfx->k2Draw();
 
 		if (nes->ppu.reg[0x1] & 0x08) {
-			// enable background rendering
-			// update constants
-			// nametable update
-			index = NESSYS_CHR_NTB_WIN_MIN;
-			for (i = 0; i < 4; i++) {
-				memcpy(buffer + (i << 10), nessys_ppu_mem(nes, index), 1024);
-				index += 1024;
+			bool done = false;
+			uint32_t phase = 0;
+			while (!done) {
+				nes->scissor_left_x = 80 - ((nes->ppu.reg[1] << 3) & 0x10);
+				nes->scissor_top_y = 2 * nes->scanline;
+				nes->scissor_right_x = 576;
+				nes->scissor_bottom_y = 480;
+
+				done = nes->mapper_bg_setup(nes, phase);
+
+				nes->gfx->k2CBUpdate(nes->cb_ppu, &(nes->ppu.reg));
+				// enable background rendering
+				// update constants
+				// nametable update
+				index = NESSYS_CHR_NTB_WIN_MIN;
+				for (i = 0; i < 4; i++) {
+					memcpy(buffer + (i << 10), nessys_ppu_mem(nes, index), 1024);
+					index += 1024;
+				}
+				nes->gfx->k2CBUpdate(nes->cb_nametable, buffer);
+
+				// pattern update
+				// copy pattern table at address 0x0, or 0x1000, if bit 4 of ppureg[0] is set, 1KB ata time
+				index = NESSYS_CHR_ROM_WIN_MIN + ((((uint32_t)nes->ppu.reg[0]) & 0x10) << 8);
+				for (i = 0; i < 4; i++) {
+					memcpy(buffer + (i << 10), nessys_ppu_mem(nes, index), 1024);
+					index += 1024;
+				}
+				nes->gfx->k2CBUpdate(nes->cb_pattern, buffer);
+
+				nes->gfx->k2SetScissorRect(nes->scissor_left_x, nes->scissor_top_y, nes->scissor_right_x, nes->scissor_bottom_y);
+				nes->gfx->k2AttachBlendState(nes->bs_mask);
+				nes->gfx->k2AttachDepthState(nes->ds_normal);
+				nes->gfx->k2AttachShaderGroup(nes->sg_background);
+				nes->gfx->k2AttachConstantGroup(nes->cg_background);
+
+				nes->gfx->k2Draw();
+				phase++;
 			}
-			nes->gfx->k2CBUpdate(nes->cb_nametable, buffer);
-
-			// pattern update
-			// copy pattern table at address 0x0, or 0x1000, if bit 4 of ppureg[0] is set, 1KB ata time
-			index = NESSYS_CHR_ROM_WIN_MIN + ((((uint32_t)nes->ppu.reg[0]) & 0x10) << 8);
-			for (i = 0; i < 4; i++) {
-				memcpy(buffer + (i << 10), nessys_ppu_mem(nes, index), 1024);
-				index += 1024;
-			}
-			nes->gfx->k2CBUpdate(nes->cb_pattern, buffer);
-
-			int32_t left_x = 80 - ((nes->ppu.reg[1] << 3) & 0x10);
-			nes->gfx->k2SetScissorRect(left_x, 2 * nes->scanline, 576, 480);
-			nes->gfx->k2AttachBlendState(nes->bs_mask);
-			nes->gfx->k2AttachDepthState(nes->ds_normal);
-			nes->gfx->k2AttachShaderGroup(nes->sg_background);
-			nes->gfx->k2AttachConstantGroup(nes->cg_background);
-
-			nes->gfx->k2Draw();
 		}
 
 		if (nes->ppu.reg[0x1] & 0x10) {
-			// enable sprite rendering
-			nes->gfx->k2AttachBlendState(nes->bs_mask);
-			nes->gfx->k2AttachDepthStateWithRef(nes->ds_sprite, 8);
-			nes->gfx->k2AttachRasterizerState(nes->rs_normal);
+			bool done = false;
+			uint32_t phase = 0;
+			while (!done) {
+				nes->scissor_left_x = 80 - ((nes->ppu.reg[1] << 2) & 0x10);
+				nes->scissor_top_y = 2 * nes->scanline;
+				nes->scissor_right_x = 576;
+				nes->scissor_bottom_y = 480;
 
-			int32_t left_x = 80 - ((nes->ppu.reg[1] << 2) & 0x10);
-			nes->gfx->k2SetScissorRect(left_x, 2*nes->scanline, 576, 480);
+				done = nes->mapper_sprite_setup(nes, phase);
 
-			// update constants that are same for all sprites
-			index = NESSYS_CHR_ROM_WIN_MIN;
-			for (i = 0; i < 8; i++) {
-				memcpy(buffer + (i << 10), nessys_ppu_mem(nes, index), 1024);
-				index += 1024;
+				// enable sprite rendering
+				nes->gfx->k2AttachBlendState(nes->bs_mask);
+				nes->gfx->k2AttachDepthStateWithRef(nes->ds_sprite, 8);
+				nes->gfx->k2AttachRasterizerState(nes->rs_normal);
+				nes->gfx->k2SetScissorRect(nes->scissor_left_x, nes->scissor_top_y, nes->scissor_right_x, nes->scissor_bottom_y);
+
+				// update constants that are same for all sprites
+				index = NESSYS_CHR_ROM_WIN_MIN;
+				for (i = 0; i < 8; i++) {
+					memcpy(buffer + (i << 10), nessys_ppu_mem(nes, index), 1024);
+					index += 1024;
+				}
+				nes->gfx->k2CBUpdate(nes->cb_ppu, &(nes->ppu.reg));
+				nes->gfx->k2CBUpdate(nes->cb_pattern, buffer);
+				nes->gfx->k2CBUpdate(nes->cb_palette, palette + 2 * NESSYS_PPU_PAL_SIZE);
+				nes->gfx->k2CBUpdate(nes->cb_sprite, nes->ppu.oam);
+				nes->gfx->k2AttachConstantGroup(nes->cg_sprite);
+
+				nes->gfx->k2AttachInstancedVertexGroup(nes->vg_sprite, 4, 128);
+				nes->gfx->k2AttachShaderGroup(nes->sg_sprite);
+
+				nes->gfx->k2Draw();
+
+				phase++;
+				//for (i = 0; i < 64; i++) {
+				//	if (nes->ppu.oam[4 * i] < 0xef) {
+				//
+				//		// update constant buffers
+				//		nes->gfx->k2CBUpdate(nes->cb_sprite, &(nes->ppu.oam[4 * i]));
+				//		nes->gfx->k2AttachConstantGroup(nes->cg_sprite);
+				//
+				//		nes->gfx->k2Draw();
+				//	}
+				//}
 			}
-			nes->gfx->k2CBUpdate(nes->cb_pattern, buffer);
-			nes->gfx->k2CBUpdate(nes->cb_palette, palette + 2 * NESSYS_PPU_PAL_SIZE);
-			nes->gfx->k2CBUpdate(nes->cb_sprite, nes->ppu.oam);
-			nes->gfx->k2AttachConstantGroup(nes->cg_sprite);
-
-			nes->gfx->k2AttachInstancedVertexGroup(nes->vg_sprite, 4, 128);
-			nes->gfx->k2AttachShaderGroup(nes->sg_sprite);
-
-			nes->gfx->k2Draw();
-
-			//for (i = 0; i < 64; i++) {
-			//	if (nes->ppu.oam[4 * i] < 0xef) {
-			//
-			//		// update constant buffers
-			//		nes->gfx->k2CBUpdate(nes->cb_sprite, &(nes->ppu.oam[4 * i]));
-			//		nes->gfx->k2AttachConstantGroup(nes->cg_sprite);
-			//
-			//		nes->gfx->k2Draw();
-			//	}
-			//}
 		}
 
 		// compute sprite0 hit
@@ -819,6 +845,7 @@ void K2CALLBACK nessys_display(void* ptr)
 		// need to only do this if sprtes have changed position
 		nessys_gen_scanline_sprite_map(&(nes->ppu));
 
+		nes->mapper_cpu_setup(nes);
 		cycles = nessys_exec_cpu_cycles(nes, 0);
 		//printf("executed %d cycles; cycles remaining %d\n", cycles, nes->cycles_remaining);
 	} while (nes->cycles_remaining > 100);
@@ -1064,6 +1091,9 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 		addr = 0x0;  // just a defulat address, if not used
 		// perform addressing operation to get operand
 		bank = 0;
+		if (nes->reg.pc == 0xe0e1) {
+			addr = 0x0;
+		}
 		switch (op->addr) {
 		case C6502_ADDR_NONE:
 			break;
@@ -1261,6 +1291,9 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					nes->apu.reg[NESSYS_APU_STATUS_OFFSET] |= (nes->apu.triangle.length) ? 0x4 : 0x0;
 					nes->apu.reg[NESSYS_APU_STATUS_OFFSET] |= (nes->apu.noise.length)    ? 0x8 : 0x0;
 					nes->apu.reg[NESSYS_APU_STATUS_OFFSET] |= (nes->apu.dmc.bytes_remaining) ? 0x10 : 0x0;
+				} else if (offset >= NESSYS_APU_SIZE) {
+					uint8_t* op = nes->mapper_read(nes, addr);
+					if (op) operand = op;
 				}
 				break;
 			}
@@ -1303,7 +1336,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				nes->reg.p |= overflow << C6502_P_C_SHIFT;
 				nes->reg.p |= ((result & 0xFF) == 0x00) << C6502_P_Z_SHIFT;
 				nes->reg.p |= (result & 0x80) >> (7 - C6502_P_N_SHIFT);
-				if (bank < NESSYS_PRG_ROM_START_BANK) {
+				if (bank < NESSYS_PRG_ROM_START_BANK && !(bank == NESSYS_APU_REG_START_BANK && offset >= NESSYS_APU_SIZE)) {
 					ppu_write = (bank == NESSYS_PPU_REG_START_BANK) || (bank == NESSYS_APU_REG_START_BANK && offset == 0x14);
 					apu_write = (bank == NESSYS_APU_REG_START_BANK);
 					if (apu_write && offset >= NESSYS_APU_STATUS_OFFSET) {
@@ -1478,7 +1511,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				nes->reg.p &= ~(C6502_P_N | C6502_P_Z);
 				nes->reg.p |= ((result & 0xFF) == 0x00) << C6502_P_Z_SHIFT;
 				nes->reg.p |= (result & 0x80) >> (7 - C6502_P_N_SHIFT);
-				if (bank < NESSYS_PRG_ROM_START_BANK) {
+				if (bank < NESSYS_PRG_ROM_START_BANK && !(bank == NESSYS_APU_REG_START_BANK && offset >= NESSYS_APU_SIZE)) {
 					ppu_write = (bank == NESSYS_PPU_REG_START_BANK) || (bank == NESSYS_APU_REG_START_BANK && offset == 0x14);
 					apu_write = (bank == NESSYS_APU_REG_START_BANK);
 					if (apu_write && offset >= NESSYS_APU_STATUS_OFFSET) {
@@ -1533,7 +1566,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				nes->reg.p &= ~(C6502_P_N | C6502_P_Z);
 				nes->reg.p |= ((result & 0xFF) == 0x00) << C6502_P_Z_SHIFT;
 				nes->reg.p |= (result & 0x80) >> (7 - C6502_P_N_SHIFT);
-				if (bank < NESSYS_PRG_ROM_START_BANK) {
+				if (bank < NESSYS_PRG_ROM_START_BANK && !(bank == NESSYS_APU_REG_START_BANK && offset >= NESSYS_APU_SIZE)) {
 					ppu_write = (bank == NESSYS_PPU_REG_START_BANK) || (bank == NESSYS_APU_REG_START_BANK && offset == 0x14);
 					apu_write = (bank == NESSYS_APU_REG_START_BANK);
 					if (apu_write && offset >= NESSYS_APU_STATUS_OFFSET) {
@@ -1619,7 +1652,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				nes->reg.p |= overflow << C6502_P_C_SHIFT;
 				nes->reg.p |= ((result & 0xFF) == 0x00) << C6502_P_Z_SHIFT;
 				nes->reg.p |= (result & 0x80) >> (7 - C6502_P_N_SHIFT);
-				if (bank < NESSYS_PRG_ROM_START_BANK) {
+				if (bank < NESSYS_PRG_ROM_START_BANK && !(bank == NESSYS_APU_REG_START_BANK && offset >= NESSYS_APU_SIZE)) {
 					ppu_write = (bank == NESSYS_PPU_REG_START_BANK) || (bank == NESSYS_APU_REG_START_BANK && offset == 0x14);
 					apu_write = (bank == NESSYS_APU_REG_START_BANK);
 					if (apu_write && offset >= NESSYS_APU_STATUS_OFFSET) {
@@ -1684,7 +1717,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				nes->reg.p |= (result & 0x100) >> (8 - C6502_P_C_SHIFT);
 				nes->reg.p |= ((result & 0xFF) == 0x00) << C6502_P_Z_SHIFT;
 				nes->reg.p |= (result & 0x80) >> (7 - C6502_P_N_SHIFT);
-				if (bank < NESSYS_PRG_ROM_START_BANK) {
+				if (bank < NESSYS_PRG_ROM_START_BANK && !(bank == NESSYS_APU_REG_START_BANK && offset >= NESSYS_APU_SIZE)) {
 					ppu_write = (bank == NESSYS_PPU_REG_START_BANK) || (bank == NESSYS_APU_REG_START_BANK && offset == 0x14);
 					apu_write = (bank == NESSYS_APU_REG_START_BANK);
 					if (apu_write && offset >= NESSYS_APU_STATUS_OFFSET) {
@@ -1716,7 +1749,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				nes->reg.p |= (*operand & 0x1) << C6502_P_C_SHIFT;
 				nes->reg.p |= ((result & 0xFF) == 0x00) << C6502_P_Z_SHIFT;
 				nes->reg.p |= (result & 0x80) >> (7 - C6502_P_N_SHIFT);
-				if (bank < NESSYS_PRG_ROM_START_BANK) {
+				if (bank < NESSYS_PRG_ROM_START_BANK && !(bank == NESSYS_APU_REG_START_BANK && offset >= NESSYS_APU_SIZE)) {
 					ppu_write = (bank == NESSYS_PPU_REG_START_BANK) || (bank == NESSYS_APU_REG_START_BANK && offset == 0x14);
 					apu_write = (bank == NESSYS_APU_REG_START_BANK);
 					if (apu_write && offset >= NESSYS_APU_STATUS_OFFSET) {
@@ -1789,7 +1822,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				nes->reg.p |= C6502_P_I;
 				break;
 			case C6502_INS_STA:
-				if (bank < NESSYS_PRG_ROM_START_BANK) {
+				if (bank < NESSYS_PRG_ROM_START_BANK && !(bank == NESSYS_APU_REG_START_BANK && offset >= NESSYS_APU_SIZE)) {
 					ppu_write = (bank == NESSYS_PPU_REG_START_BANK) || (bank == NESSYS_APU_REG_START_BANK && offset == 0x14);
 					apu_write = (bank == NESSYS_APU_REG_START_BANK);
 					if (apu_write && offset >= NESSYS_APU_STATUS_OFFSET) {
@@ -1818,7 +1851,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				}
 				break;
 			case C6502_INS_STX:
-				if (bank < NESSYS_PRG_ROM_START_BANK) {
+				if (bank < NESSYS_PRG_ROM_START_BANK && !(bank == NESSYS_APU_REG_START_BANK && offset >= NESSYS_APU_SIZE)) {
 					ppu_write = (bank == NESSYS_PPU_REG_START_BANK) || (bank == NESSYS_APU_REG_START_BANK && offset == 0x14);
 					apu_write = (bank == NESSYS_APU_REG_START_BANK);
 					if (apu_write && offset >= NESSYS_APU_STATUS_OFFSET) {
@@ -1844,7 +1877,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				}
 				break;
 			case C6502_INS_STY:
-				if (bank < NESSYS_PRG_ROM_START_BANK) {
+				if (bank < NESSYS_PRG_ROM_START_BANK && !(bank == NESSYS_APU_REG_START_BANK && offset >= NESSYS_APU_SIZE)) {
 					ppu_write = (bank == NESSYS_PPU_REG_START_BANK) || (bank == NESSYS_APU_REG_START_BANK && offset == 0x14);
 					apu_write = (bank == NESSYS_APU_REG_START_BANK);
 					if (apu_write && offset >= NESSYS_APU_JOYPAD0_OFFSET) {
@@ -2105,6 +2138,8 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				}
 				switch (offset) {
 				case 0x0:
+					// if we toggle vblank enable from 0 to 1 while in vblank, retrigger a vblank
+					if ((nes->ppu.reg[2] & 0x80) && (data_change & 0x80) && (nes->ppu.reg[0] & 0x80)) nes->vblank_cycles = 1;
 					// we only re-render frame if bits that change rendering changes
 					ppu_ever_written = ppu_ever_written || (data_change & 0x39);
 					break;

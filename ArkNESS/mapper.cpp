@@ -6,6 +6,27 @@
 
 #include "mapper.h"
 
+bool mapper_null_setup(nessys_t* nes, uint32_t phase)
+{
+	return true;
+}
+
+void mapper_null_cpu_setup(nessys_t* nes)
+{ }
+
+void mapper_audio_tick_null(nessys_t* nes)
+{ }
+
+int16_t mapper_gen_sound_null(nessys_t* nes)
+{
+	return 0;
+}
+
+uint8_t* mapper_read_null(nessys_t* nes, uint16_t addr)
+{
+	return NULL;
+}
+
 bool mapper_write_null(nessys_t* nes, uint16_t addr, uint8_t data)
 {
 	return false;
@@ -395,6 +416,442 @@ bool mapper4_update(nessys_t* nes)
 	return false;
 }
 
+// mapper5 functions
+void mapper5_reset(nessys_t* nes)
+{
+	mapper5_data* m5_data = (mapper5_data*)nes->mapper_data;
+	m5_data->prg_mode = 0x3;
+	uint16_t max_prg_rom_bank_offset = (nes->prg_rom_size >> MAPPER5_PRG_BANK_BASE_SIZE_LOG2) + ((nes->prg_rom_size & MAPPER5_PRG_BANK_BASE_MASK) ? 1 : 0);
+	m5_data->prg_bank[4] = max_prg_rom_bank_offset - 1;
+	if (nes->prg_ram_size < 0x10000) {
+		if (nes->prg_ram_size) free(nes->prg_ram_base);
+		nes->prg_ram_size = 0x10000;
+		nes->prg_ram_base = (uint8_t*) malloc(nes->prg_ram_size);
+	}
+	nes->apu.reg = m5_data->mem;
+	nes->prg_rom_bank[NESSYS_APU_REG_START_BANK] = nes->apu.reg;
+	nes->prg_rom_bank_mask[NESSYS_APU_REG_START_BANK] = NESSYS_PRG_MEM_MASK;
+}
+
+void mapper5_audio_tick(nessys_t* nes)
+{
+	mapper5_data* m5_data = (mapper5_data*)nes->mapper_data;
+	nessys_apu_env_tick(&(m5_data->pulse[0].env));
+	nessys_apu_env_tick(&(m5_data->pulse[1].env));
+	nessys_apu_sweep_tick(&(m5_data->pulse[0]));
+	nessys_apu_sweep_tick(&(m5_data->pulse[1]));
+}
+
+int16_t mapper5_gen_sound(nessys_t* nes)
+{
+	mapper5_data* m5_data = (mapper5_data*)nes->mapper_data;
+	uint8_t pulse_sound = nessys_apu_gen_pulse(&(m5_data->pulse[0])) +
+		nessys_apu_gen_pulse(&(m5_data->pulse[1]));
+	uint8_t pcm_sound = 0;// nessys_apu_gen_dmc(nes);
+	float pulse_soundf = (pulse_sound) ?
+		95.88f / ((8128.0f / pulse_sound) + 100.0f) : 0.0f;
+	float other_soundf = (pcm_sound) ?
+		159.79f / (1.0f / ((pcm_sound / 22638.0f))) : 0.0f;
+	float soundf = pulse_soundf + other_soundf;
+	int16_t sound = (int16_t)(16384.0f * (soundf - 0.5f));
+	return sound;
+}
+
+void mapper5_update_nametable_map(nessys_t* nes)
+{
+	mapper5_data* m5_data = (mapper5_data*)nes->mapper_data;
+	uint32_t i;
+	for (i = 0; i < 4; i++) {
+		switch ((m5_data->ntb_map >> (2 * i)) & 0x3) {
+		case 0:
+			nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + i] = nes->ppu.mem;
+			break;
+		case 1:
+			nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + i] = nes->ppu.mem + 0x400;
+			break;
+		case 2:
+			nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + i] = m5_data->mem + MAPPER5_ADDR_EXP_RAM_START_OFFSET;
+			break;
+		case 3:
+			nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + i] = m5_data->mem + MAPPER5_ADDR_FILL_DATA_OFFSET;
+			break;
+		}
+	}
+}
+
+void mapper5_update_prg_map(nessys_t* nes)
+{
+	mapper5_data* m5_data = (mapper5_data*)nes->mapper_data;
+	uint16_t max_prg_rom_bank_offset = (nes->prg_rom_size >> MAPPER5_PRG_BANK_BASE_SIZE_LOG2) + ((nes->prg_rom_size & MAPPER5_PRG_BANK_BASE_MASK) ? 1 : 0);
+	uint16_t max_prg_ram_bank_offset = (nes->prg_ram_size >> MAPPER5_PRG_BANK_BASE_SIZE_LOG2) + ((nes->prg_ram_size & MAPPER5_PRG_BANK_BASE_MASK) ? 1 : 0);
+	bool bank_uses_ram[5];
+	uint16_t bank[5];
+	uint32_t i;
+	for (i = 0; i < 5; i++) {
+		bank_uses_ram[i] = (m5_data->prg_bank[i] & 0x80) ? false : true;
+		bank[i] = m5_data->prg_bank[i] & 0x7f;
+	}
+	bank_uses_ram[0] = true;  // 0x6000-0x7fff must use ram
+	bank_uses_ram[4] = false; // 0xe000-0xffff muse use rom
+	switch (m5_data->prg_mode) {
+	case 0:
+		bank[1] = bank[4] & ~0x3;
+		bank[2] = bank[1] + 1;
+		bank[3] = bank[1] + 2;
+		bank[4] = bank[1] + 3;
+		bank_uses_ram[1] = false;
+		bank_uses_ram[2] = false;
+		bank_uses_ram[3] = false;
+		break;
+	case 1:
+		bank[3] = bank[4] & ~0x1;
+		bank[4] = bank[3] + 1;
+		bank_uses_ram[3] = false;
+		// no break - on purpose; mode 1 and 2 do the same thing for bank[1]
+	case 2:
+		bank[1] = bank[2] & ~0x1;
+		bank[2] = bank[1] + 1;
+		bank_uses_ram[1] = bank_uses_ram[2];
+		break;
+	}
+	uint8_t* base;
+	uint16_t max_bank_offset;
+	for (i = 0; i < 5; i++) {
+		base = (bank_uses_ram[i]) ? nes->prg_ram_base : nes->prg_rom_base;
+		max_bank_offset = (bank_uses_ram[i]) ? max_prg_ram_bank_offset : max_prg_rom_bank_offset;
+		bank[i] %= max_bank_offset;
+		nes->prg_rom_bank[3 + i] = base + (((uint32_t)bank[i]) << MAPPER5_PRG_BANK_BASE_SIZE_LOG2);
+	}
+}
+
+void mapper5_update_chr_map(nessys_t* nes, bool upper_reg_touched)
+{
+	mapper5_data* m5_data = (mapper5_data*)nes->mapper_data;
+	uint16_t max_chr_rom_bank_offset = (nes->ppu.chr_rom_size >> MAPPER5_CHR_BANK_BASE_SIZE_LOG2) + ((nes->ppu.chr_rom_size & MAPPER5_CHR_BANK_BASE_MASK) ? 1 : 0);
+	if (max_chr_rom_bank_offset == 0) max_chr_rom_bank_offset = (nes->ppu.chr_ram_size >> MAPPER5_CHR_BANK_BASE_SIZE_LOG2) + ((nes->ppu.chr_ram_size & MAPPER5_CHR_BANK_BASE_MASK) ? 1 : 0);
+	uint32_t bank[8];
+	uint32_t i;
+	uint32_t bank_shift = 0;
+	uint32_t index_mask = 0x7;
+	if ((nes->ppu.reg[0] & 0x20) && upper_reg_touched) {
+		// in 8x16 sprite mdoe, if the upper regs were last touched, map in the upper regs
+		bank_shift = 8;
+		index_mask = 0x3;
+	}
+	for (i = 0; i < 8; i++) {
+		bank[i] = m5_data->chr_bank[bank_shift + (i & index_mask)];
+	}
+	bank_shift = (3 - m5_data->chr_mode);
+	index_mask = (1 << bank_shift) - 1;
+	uint8_t* base = (nes->ppu.chr_rom_base) ? nes->ppu.chr_rom_base : nes->ppu.chr_ram_base;
+	for (i = 0; i < 8; i++) {
+		bank[i] = bank[i | index_mask] << bank_shift;
+		bank[i] += (i & index_mask);
+		bank[i] %= max_chr_rom_bank_offset;
+		bank[i] <<= MAPPER5_CHR_BANK_BASE_SIZE_LOG2;
+		nes->ppu.chr_rom_bank[i] = base + bank[i];
+	}
+}
+
+bool mapper5_bg_setup(nessys_t* nes, uint32_t phase)
+{
+	mapper5_data* m5_data = (mapper5_data*)nes->mapper_data;
+	if (m5_data->vsplit_mode & 0x80) {
+		// vertical split is enabled
+		int32_t split_pos = (m5_data->vsplit_mode & 0x1f) << 3;
+		if (split_pos) split_pos -= nes->ppu.scroll[0] & 0x7;
+		split_pos <<= 1;
+		split_pos += 64;
+		if (phase == 0) {
+			nes->scissor_right_x = split_pos;
+			// save away the scroll information
+			m5_data->scroll_save[0] = nes->ppu.scroll[0];
+			m5_data->scroll_save[1] = nes->ppu.scroll[1];
+			m5_data->scroll_save_y = nes->ppu.scroll_y;
+		} else {
+			nes->scissor_left_x = split_pos;
+			nes->scissor_right_x = 576;
+		}
+		uint32_t vsplit_is_right = (m5_data->vsplit_mode >> 6) & 0x1;
+		if (phase == vsplit_is_right) {
+			// map vsplit chr banks
+			uint16_t max_chr_rom_bank_offset = (nes->ppu.chr_rom_size >> MAPPER5_CHR_BANK_BASE_SIZE_LOG2) + ((nes->ppu.chr_rom_size & MAPPER5_CHR_BANK_BASE_MASK) ? 1 : 0);
+			if (max_chr_rom_bank_offset == 0) max_chr_rom_bank_offset = (nes->ppu.chr_ram_size >> MAPPER5_CHR_BANK_BASE_SIZE_LOG2) + ((nes->ppu.chr_ram_size & MAPPER5_CHR_BANK_BASE_MASK) ? 1 : 0);
+			uint8_t* base = (nes->ppu.chr_rom_base) ? nes->ppu.chr_rom_base : nes->ppu.chr_ram_base;
+			uint32_t i, bank;
+			for (i = 0; i < 8; i++) {
+				bank = m5_data->vsplit_bank;
+				bank <<= 2;
+				bank &= ~0x3;
+				bank += (i & 0x3);
+				bank %= max_chr_rom_bank_offset;
+				bank <<= MAPPER5_CHR_BANK_BASE_SIZE_LOG2;
+				nes->ppu.chr_rom_bank[i] = base + bank;
+			}
+			// map expanded ram to name table
+			for (i = 0; i < 4; i++) {
+				nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + i] = m5_data->mem + MAPPER5_ADDR_EXP_RAM_START_OFFSET;
+			}
+			// use vscroll, and there is no hscroll
+			nes->ppu.scroll[0] = 0;
+			nes->ppu.scroll[1] = m5_data->vsplit_scroll;
+			nes->ppu.scroll_y = m5_data->vsplit_scroll;
+		} else {
+			// use default chr banks
+			mapper5_update_chr_map(nes, true);
+			// restore nametable
+			mapper5_update_nametable_map(nes);
+			// restore scroll
+			nes->ppu.scroll[0] = m5_data->scroll_save[0];
+			nes->ppu.scroll[1] = m5_data->scroll_save[1];
+			nes->ppu.scroll_y = m5_data->scroll_save_y;
+		}
+		// if phase is one, we're done; otherwise we're not
+		return (phase) ? true : false;
+	} else {
+		mapper5_update_chr_map(nes, true);
+		return true;
+	}
+}
+
+bool mapper5_sprite_setup(nessys_t* nes, uint32_t phase)
+{
+	mapper5_data* m5_data = (mapper5_data*)nes->mapper_data;
+	if (m5_data->vsplit_mode & 0x80) {
+		// restore chr banks
+		nes->ppu.scroll[0] = m5_data->scroll_save[0];
+		nes->ppu.scroll[1] = m5_data->scroll_save[1];
+		nes->ppu.scroll_y = m5_data->scroll_save_y;
+		// restore nametable
+		mapper5_update_nametable_map(nes);
+	}
+	mapper5_update_chr_map(nes, false);
+	return true;
+}
+
+void mapper5_cpu_setup(nessys_t* nes)
+{
+	mapper5_data* m5_data = (mapper5_data*)nes->mapper_data;
+	mapper5_update_chr_map(nes, m5_data->upper_reg_touched);
+}
+
+uint8_t* mapper5_read(nessys_t* nes, uint16_t addr)
+{
+	mapper5_data* m5_data = (mapper5_data*)nes->mapper_data;
+	switch (addr) {
+	case MAPPER5_ADDR_SCANLINE_IRQ_STATUS:
+		m5_data->scanline_irq_pend_clear = 0x80;
+		break;
+	}
+	return NULL;
+}
+
+bool mapper5_write(nessys_t* nes, uint16_t addr, uint8_t data)
+{
+	mapper5_data* m5_data = (mapper5_data*)nes->mapper_data;
+	uint16_t data_change = 0x0;
+	uint16_t result;
+	if (addr >= MAPPER5_ADDR_EXP_RAM_START && addr < MAPPER5_ADDR_EXP_RAM_START + MAPPER5_EXP_RAM_SIZE && m5_data->exp_ram_mode < 0x3) {
+		// access expanded ram
+		uint16_t mem_addr = addr - NESSYS_APU_WIN_MIN;
+		if (m5_data->exp_ram_mode < 0x2) {
+			data_change = m5_data->mem[mem_addr] ^ data;
+		}
+		m5_data->mem[mem_addr] = data;
+	} else {
+		if (addr < MAPPER5_ADDR_PRG_MODE) {
+			// audio register
+			nessys_gen_sound(nes);
+		}
+		// access other registers
+		switch (addr) {
+		case MAPPER5_ADDR_PULSE0_CTRL:
+			m5_data->pulse[0].env.volume = data & 0xf;
+			m5_data->pulse[0].env.flags &= ~(NESSYS_APU_PULSE_FLAG_HALT_LENGTH | NESSYS_APU_PULSE_FLAG_CONST_VOLUME);
+			m5_data->pulse[0].env.flags |= data & (NESSYS_APU_PULSE_FLAG_HALT_LENGTH | NESSYS_APU_PULSE_FLAG_CONST_VOLUME);
+			m5_data->pulse[0].duty = NESSYS_APU_PULSE_DUTY_TABLE[(data >> 6) & 0x3];
+			break;
+		case MAPPER5_ADDR_PULSE0_SWEEP:
+			// no sweeper units in MMC5
+			break;
+		case MAPPER5_ADDR_PULSE0_TIMER:
+			m5_data->pulse[0].period &= 0xFF00;
+			m5_data->pulse[0].period |= data;
+			m5_data->pulse[0].sweep_orig_period = m5_data->pulse[0].period;
+			break;
+		case MAPPER5_ADDR_PULSE0_RELOAD:
+			m5_data->pulse[0].period &= 0x00FF;
+			m5_data->pulse[0].period |= ((uint16_t)data << 8) & 0x700;
+			m5_data->pulse[0].sweep_orig_period = m5_data->pulse[0].period;
+			m5_data->pulse[0].length = NESSYS_APU_PULSE_LENGTH_TABLE[(data >> 3) & 0x1f];
+			m5_data->pulse[0].duty_phase = 0;
+			m5_data->pulse[0].cur_time_frac = 0;
+			m5_data->pulse[0].env.flags |= NESSYS_APU_PULSE_FLAG_ENV_START;
+			break;
+		case MAPPER5_ADDR_PULSE1_CTRL:
+			m5_data->pulse[1].env.volume = data & 0xf;
+			m5_data->pulse[1].env.flags &= ~(NESSYS_APU_PULSE_FLAG_HALT_LENGTH | NESSYS_APU_PULSE_FLAG_CONST_VOLUME);
+			m5_data->pulse[1].env.flags |= data & (NESSYS_APU_PULSE_FLAG_HALT_LENGTH | NESSYS_APU_PULSE_FLAG_CONST_VOLUME);
+			m5_data->pulse[1].duty = NESSYS_APU_PULSE_DUTY_TABLE[(data >> 6) & 0x3];
+			break;
+		case MAPPER5_ADDR_PULSE1_SWEEP:
+			// no sweeper units in MMC5
+			break;
+		case MAPPER5_ADDR_PULSE1_TIMER:
+			m5_data->pulse[1].period &= 0xFF00;
+			m5_data->pulse[1].period |= data;
+			m5_data->pulse[1].sweep_orig_period = m5_data->pulse[1].period;
+			break;
+		case MAPPER5_ADDR_PULSE1_RELOAD:
+			m5_data->pulse[1].period &= 0x00FF;
+			m5_data->pulse[1].period |= ((uint16_t)data << 8) & 0x700;
+			m5_data->pulse[1].sweep_orig_period = m5_data->pulse[1].period;
+			m5_data->pulse[1].length = NESSYS_APU_PULSE_LENGTH_TABLE[(data >> 3) & 0x1f];
+			m5_data->pulse[1].duty_phase = 0;
+			m5_data->pulse[1].cur_time_frac = 0;
+			m5_data->pulse[1].env.flags |= NESSYS_APU_PULSE_FLAG_ENV_START;
+		case MAPPER5_ADDR_PCM_CTRL:
+			// TODO
+			break;
+		case MAPPER5_ADDR_PCM_DATA:
+			// TODO
+			break;
+		case MAPPER5_ADDR_PRG_MODE:
+			m5_data->prg_mode = data & 0x3;
+			mapper5_update_prg_map(nes);
+			break;
+		case MAPPER5_ADDR_CHR_MODE:
+			data_change = m5_data->chr_mode;
+			m5_data->chr_mode = data & 0x3;
+			data_change ^= m5_data->chr_mode;
+			mapper5_update_chr_map(nes, m5_data->upper_reg_touched);
+			break;
+		case MAPPER5_ADDR_PRG_RAM_PROTECT1:
+			m5_data->prg_ram_protect1 = data & 0x3;
+			break;
+		case MAPPER5_ADDR_PRG_RAM_PROTECT2:
+			m5_data->prg_ram_protect2 = data & 0x3;
+			break;
+		case MAPPER5_ADDR_EXP_RAM_MODE:
+			m5_data->exp_ram_mode = data & 0x3;
+			break;
+		case MAPPER5_ADDR_NTB_MAP:
+			data_change = m5_data->ntb_map;
+			m5_data->ntb_map = data;
+			data_change ^= m5_data->ntb_map;
+			mapper5_update_nametable_map(nes);
+			break;
+		case MAPPER5_ADDR_FILL_MODE_TILE:
+			data_change = m5_data->mem[MAPPER5_ADDR_FILL_DATA_OFFSET];
+			data_change ^= data;
+			memset(m5_data->mem + MAPPER5_ADDR_FILL_DATA_OFFSET, data, 960);
+			break;
+		case MAPPER5_ADDR_FILL_MODE_COLOR:
+			// replicate bottom 2 bits up through the byte
+			data &= 0x3;
+			data |= data << 2;
+			data |= data << 4;
+			data_change = m5_data->mem[MAPPER5_ADDR_FILL_DATA_OFFSET + 960];
+			data_change ^= data;
+			memset(m5_data->mem + MAPPER5_ADDR_FILL_DATA_OFFSET + 960, data, 64);
+			break;
+		case MAPPER5_ADDR_PRG_BANK0:
+		case MAPPER5_ADDR_PRG_BANK1:
+		case MAPPER5_ADDR_PRG_BANK2:
+		case MAPPER5_ADDR_PRG_BANK3:
+		case MAPPER5_ADDR_PRG_BANK4:
+			m5_data->prg_bank[addr - MAPPER5_ADDR_PRG_BANK0] = data;
+			mapper5_update_prg_map(nes);
+			break;
+		case MAPPER5_ADDR_CHR_BANK0:
+		case MAPPER5_ADDR_CHR_BANK1:
+		case MAPPER5_ADDR_CHR_BANK2:
+		case MAPPER5_ADDR_CHR_BANK3:
+		case MAPPER5_ADDR_CHR_BANK4:
+		case MAPPER5_ADDR_CHR_BANK5:
+		case MAPPER5_ADDR_CHR_BANK6:
+		case MAPPER5_ADDR_CHR_BANK7:
+		case MAPPER5_ADDR_CHR_BANK8:
+		case MAPPER5_ADDR_CHR_BANK9:
+		case MAPPER5_ADDR_CHR_BANKA:
+		case MAPPER5_ADDR_CHR_BANKB:
+			data_change = m5_data->chr_bank[addr - MAPPER5_ADDR_CHR_BANK0];
+			data_change ^= data | (((uint16_t)m5_data->msb_chr_bank) << 8);
+			m5_data->chr_bank[addr - MAPPER5_ADDR_CHR_BANK0] = data;
+			m5_data->chr_bank[addr - MAPPER5_ADDR_CHR_BANK0] |= ((uint16_t)m5_data->msb_chr_bank) << 8;
+			m5_data->upper_reg_touched = (addr >= MAPPER5_ADDR_CHR_BANK8);
+			mapper5_update_chr_map(nes, m5_data->upper_reg_touched);
+			break;
+		case MAPPER5_ADDR_UPPER_CHR_BANK:
+			m5_data->msb_chr_bank = data & 0x3;
+			break;
+		case MAPPER5_ADDR_VSPLIT_MODE:
+			data_change = m5_data->vsplit_mode;
+			data_change ^= data;
+			m5_data->vsplit_mode = data;
+			break;
+		case MAPPER5_ADDR_VSPLIT_SCROLL:
+			data_change = m5_data->vsplit_scroll;
+			data_change ^= data;
+			m5_data->vsplit_scroll = data;
+			break;
+		case MAPPER5_ADDR_VSPLIT_BANK:
+			data_change = m5_data->vsplit_bank;
+			data_change ^= data;
+			m5_data->vsplit_bank = data;
+			break;
+		case MAPPER5_ADDR_SCANLINE_IRQ_CMP:
+			m5_data->scanline_irq_cmp = data;
+			break;
+		case MAPPER5_ADDR_SCANLINE_IRQ_STATUS:
+			m5_data->scanline_irq_status = data;
+			break;
+		case MAPPER5_ADDR_MULT0:
+		case MAPPER5_ADDR_MULT1:
+			m5_data->mult[addr - MAPPER5_ADDR_MULT0] = data;
+			result = (uint16_t)m5_data->mult[0] * (uint16_t)m5_data->mult[1];
+			m5_data->mem[MAPPER5_ADDR_MULT0_OFFSET] = (uint8_t)result;
+			m5_data->mem[MAPPER5_ADDR_MULT1_OFFSET] = (uint8_t)(result >> 8);
+			break;
+		case MAPPER5_ADDR_CL3_SL3_CTRL:
+			m5_data->cl3_sl3_ctrl = data;
+			break;
+		case MAPPER5_ADDR_CL3_SL3_STATUS:
+			m5_data->cl3_sl3_status = data;
+			break;
+		case MAPPER5_ADDR_TIMER_IRQ_LSB:
+			m5_data->timer_irq &= 0xFF00;
+			m5_data->timer_irq |= data;
+			break;
+		case MAPPER5_ADDR_TIMER_IRQ_MSB:
+			m5_data->timer_irq &= 0x00FF;
+			m5_data->timer_irq |= ((uint16_t)data) << 8;
+			break;
+		}
+	}
+	return (data_change) ? true : false;
+}
+
+bool mapper5_update(nessys_t* nes)
+{
+	mapper5_data* m5_data = (mapper5_data*)nes->mapper_data;
+	nes->mapper_irq_cycles = 0;
+	if (nes->scanline != m5_data->last_scanline) {
+		m5_data->mem[MAPPER5_ADDR_SCANLINE_IRQ_STATUS_OFFSET] = ((nes->scanline >= 0) << 6);
+		m5_data->mem[MAPPER5_ADDR_SCANLINE_IRQ_STATUS_OFFSET] |= 
+			((m5_data->last_scanline < m5_data->scanline_irq_cmp) &&
+				(m5_data->scanline_irq_cmp != 0) &&
+				(nes->scanline >= m5_data->scanline_irq_cmp)) << 7;
+		m5_data->last_scanline = nes->scanline;
+	}
+	nes->mapper_irq_cycles |= ((m5_data->scanline_irq_status &
+		m5_data->mem[MAPPER5_ADDR_SCANLINE_IRQ_STATUS_OFFSET]) >> 7) & 0x1;
+	m5_data->mem[MAPPER5_ADDR_SCANLINE_IRQ_STATUS_OFFSET] &= ~(m5_data->scanline_irq_pend_clear);
+	m5_data->scanline_irq_pend_clear = 0x0;
+
+	return false;
+}
+
 // mapper7 functions
 void mapper7_update_memmap(nessys_t* nes)
 {
@@ -570,22 +1027,26 @@ bool nessys_init_mapper(nessys_t* nes)
 {
 	bool success = true;
 	nes->mapper_flags = 0;
+	nes->mapper_bg_setup = mapper_null_setup;
+	nes->mapper_sprite_setup = mapper_null_setup;
+	nes->mapper_cpu_setup = mapper_null_cpu_setup;
+	nes->mapper_audio_tick = mapper_audio_tick_null;
+	nes->mapper_gen_sound = mapper_gen_sound_null;
+	nes->mapper_read = mapper_read_null;
+	nes->mapper_write = mapper_write_null;
+	nes->mapper_update = mapper_update_null;
+	nes->mapper_data = NULL;
 	switch (nes->mapper_id) {
 	case 0:
-		nes->mapper_write = mapper_write_null;
-		nes->mapper_update = mapper_update_null;
-		nes->mapper_data = NULL;
 		break;
 	case 1:
 		nes->mapper_write = mapper1_write;
-		nes->mapper_update = mapper_update_null;
 		nes->mapper_data = malloc(sizeof(mapper1_data));
 		memset(nes->mapper_data, 0, sizeof(mapper1_data));
 		mapper1_reset(nes);
 		break;
 	case 2:
 		nes->mapper_write = mapper2_write;
-		nes->mapper_update = mapper_update_null;
 		nes->mapper_data = malloc(sizeof(mapper2_data));
 		memset(nes->mapper_data, 0, sizeof(mapper2_data));
 		break;
@@ -595,9 +1056,21 @@ bool nessys_init_mapper(nessys_t* nes)
 		nes->mapper_data = malloc(sizeof(mapper4_data));
 		memset(nes->mapper_data, 0, sizeof(mapper4_data));
 		break;
+	case 5:
+		nes->mapper_bg_setup = mapper5_bg_setup;
+		nes->mapper_sprite_setup = mapper5_sprite_setup;
+		nes->mapper_cpu_setup = mapper5_cpu_setup;
+		nes->mapper_audio_tick = mapper5_audio_tick;
+		nes->mapper_gen_sound = mapper5_gen_sound;
+		nes->mapper_read = mapper5_read;
+		nes->mapper_write = mapper5_write;
+		nes->mapper_update = mapper5_update;
+		nes->mapper_data = malloc(sizeof(mapper5_data));
+		memset(nes->mapper_data, 0, sizeof(mapper5_data));
+		mapper5_reset(nes);
+		break;
 	case 7:
 		nes->mapper_write = mapper7_write;
-		nes->mapper_update = mapper_update_null;
 		nes->mapper_data = malloc(sizeof(mapper7_data));
 		memset(nes->mapper_data, 0, sizeof(mapper7_data));
 		mapper7_update_memmap(nes);
@@ -619,6 +1092,14 @@ bool nessys_init_mapper(nessys_t* nes)
 
 void nessys_cleanup_mapper(nessys_t* nes)
 {
+	if (nes->apu.reg != nes->apu.reg_mem) {
+		// if mapper allocated new space for apu registers, then copy back that data
+		// to default space, and point to that
+		memcpy(nes->apu.reg_mem, nes->apu.reg, NESSYS_APU_SIZE);
+		nes->apu.reg = nes->apu.reg_mem;
+		nes->prg_rom_bank[NESSYS_APU_REG_START_BANK] = nes->apu.reg;
+		nes->prg_rom_bank_mask[NESSYS_APU_REG_START_BANK] = NESSYS_APU_MASK;
+	}
 	nes->mapper_write = NULL;
 	nes->mapper_update = NULL;
 	if (nes->mapper_data) {
