@@ -1091,9 +1091,6 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 		addr = 0x0;  // just a defulat address, if not used
 		// perform addressing operation to get operand
 		bank = 0;
-		if (nes->reg.pc == 0xe0e1) {
-			addr = 0x0;
-		}
 		switch (op->addr) {
 		case C6502_ADDR_NONE:
 			break;
@@ -2243,7 +2240,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 		nes->cycle += NESSYS_PPU_PER_CPU_CLK*(nes->cpu_cycle_inc);
 		next_scanline_cycle = nes->scanline_cycle;
 		next_scanline_cycle += NESSYS_PPU_PER_CPU_CLK * (nes->cpu_cycle_inc);
-		if ((nes->ppu.reg[1] & 0x18) && (nes->scanline >= -1)) {// && (nes->scanline < NESSYS_PPU_SCANLINES_RENDERED)) {
+		if ((nes->ppu.reg[1] & 0x18) && (nes->scanline >= -1) && !(ppu_write && offset == 0x06)) {// && (nes->scanline < NESSYS_PPU_SCANLINES_RENDERED)) {
 			//uint32_t a12_toggle_cycle;
 			//switch (nes->ppu.reg[0] & 0x18) {
 			//case 0x08:
