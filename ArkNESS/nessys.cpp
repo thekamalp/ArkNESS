@@ -573,8 +573,8 @@ void K2CALLBACK nessys_display(void* ptr)
 		nes->gfx->k2CBUpdate(nes->cb_ppu, &(nes->ppu.reg));
 
 		//if (nes->scanline) 
-		//printf("scanline %d ppureg[0]: 0x%x scroll: %d %d %d ppu addr 0x%x\n",
-		//	nes->scanline, nes->ppu.reg[0], nes->ppu.scroll[0], nes->ppu.scroll[1], nes->ppu.scroll_y, nes->ppu.mem_addr);
+		//	printf("scanline %d ppureg[0]: 0x%x scroll: %d %d %d ppu addr 0x%x\n",
+		//		nes->scanline, nes->ppu.reg[0], nes->ppu.scroll[0], nes->ppu.scroll[1], nes->ppu.scroll_y, nes->ppu.mem_addr);
 
 		nes->gfx->k2AttachRasterizerState(nes->rs_normal);
 		nes->gfx->k2AttachBlendState(nes->bs_normal);
@@ -827,14 +827,14 @@ void K2CALLBACK nessys_display(void* ptr)
 						}
 					}
 				}
-				//printf("sprite0 pos: %d %d ", sprite_x, sprite_y);
+				//printf("sprite0 pos: %d %d scan/cyc: %d/%d", sprite_x, sprite_y, nes->scanline, nes->scanline_cycle);
 				if (sprite0_hit) {
 					if ((int32_t)hit_y < nes->scanline) {
 						nes->sprite0_hit_cycles = 1;
 					} else {
 						nes->sprite0_hit_cycles = NESSYS_PPU_CLK_PER_SCANLINE * (hit_y - nes->scanline) + hit_x - nes->scanline_cycle;
 					}
-					//printf(" - hit\n");
+					//printf(" - hit %d\n", nes->sprite0_hit_cycles);
 				} else {
 					//printf(" - miss\n");
 
@@ -2295,14 +2295,11 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 		}
 		nes->scanline_cycle = next_scanline_cycle;
 		ppu_ever_written |= nes->mapper_update(nes);
-		if (nes->scanline_cycle >= (int32_t)NESSYS_PPU_CLK_PER_SCANLINE) {
-			//if (nes->scanline_cycle > (int32_t)2 * NESSYS_PPU_CLK_PER_SCANLINE)
-			//	printf("Large scanline cycle: %d, scanline %d cycles remaining %d\n", nes->scanline_cycle, nes->scanline, nes->cycles_remaining);
-			if (nes->scanline_cycle >= (int32_t)NESSYS_PPU_CLK_PER_SCANLINE) {
-				nes->scanline_cycle -= NESSYS_PPU_CLK_PER_SCANLINE;
-				nes->scanline++;
-			}
-			if (nes->scanline >= (int32_t) NESSYS_PPU_SCANLINES_RENDERED) {
+		if (nes->scanline_cycle >= (int32_t)324) {
+			nes->scanline_cycle -= NESSYS_PPU_CLK_PER_SCANLINE;
+
+			nes->scanline++;
+			if (nes->scanline >= (int32_t)NESSYS_PPU_SCANLINES_RENDERED) {
 				nes->scanline -= NESSYS_PPU_SCANLINES_PER_FRAME;
 			}
 			// if we are on positive scanline, the we are in the display portion of the frame
