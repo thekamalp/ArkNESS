@@ -2269,6 +2269,9 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					sp_cycle &= ~0x3;
 					sp_cycle |= next_scanline_cycle & 0x3;
 					int32_t sp_index;
+					uint32_t saved_cpu_cycle_inc = nes->cpu_cycle_inc;
+					// if we call mapper_update several times, we don't want it to update cpu cycle count every time; just the last time, which happens outside this loop
+					nes->cpu_cycle_inc = 0;
 					while (sp_cycle <= next_scanline_cycle) {
 						sp_index = (sp_cycle - 260) / 4;
 						sp_cycle += 4;
@@ -2283,6 +2286,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 							ppu_ever_written |= nes->mapper_update(nes);
 						}
 					}
+					nes->cpu_cycle_inc = saved_cpu_cycle_inc;
 				}
 			} else {
 				// 8x8 sprites generally toggle once per scanline
