@@ -477,6 +477,10 @@ void mapper5_update_nametable_map(nessys_t* nes)
 			break;
 		}
 	}
+	uint8_t b;
+	for (b = NESSYS_CHR_NTB_START_BANK + 4; b <= NESSYS_CHR_NTB_END_BANK; b++) {
+		nes->ppu.chr_rom_bank[b] = nes->ppu.chr_rom_bank[b - 4];
+	}
 }
 
 void mapper5_update_prg_map(nessys_t* nes)
