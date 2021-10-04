@@ -6,9 +6,9 @@
 
 #include "mapper.h"
 
-bool mapper_null_setup(nessys_t* nes, uint32_t phase)
+uint32_t mapper_null_setup(nessys_t* nes, uint32_t phase)
 {
-	return true;
+	return NESSYS_MAPPER_SETUP_DEFAULT;
 }
 
 void mapper_null_cpu_setup(nessys_t* nes)
@@ -417,6 +417,31 @@ bool mapper4_update(nessys_t* nes)
 }
 
 // mapper5 functions
+void mapper5_update_exp_chr_rom(nessys_t* nes)
+{
+	mapper5_data* m5_data = (mapper5_data*)nes->mapper_data;
+	if (m5_data->exp_ram_mode == 0x1) {
+		uint8_t* base = NULL;
+		uint32_t size = 0;
+		if (nes->ppu.chr_rom_base) {
+			base = nes->ppu.chr_rom_base;
+			size = nes->ppu.chr_rom_size;
+		} else {
+			base = nes->ppu.chr_ram_base;
+			size = nes->ppu.chr_ram_size;
+		}
+		uint32_t offset = (256 * 1024 * m5_data->msb_chr_bank) % size;
+		if (offset + 256 * 1024 > size) {
+			size -= offset;
+			uint8_t buffer[256 * 1024];
+			memcpy(buffer, base + offset, size);
+			nes->gfx->k2SurfUpdate(nes->st_exp_pattern, buffer);
+		} else {
+			nes->gfx->k2SurfUpdate(nes->st_exp_pattern, base + offset);
+		}
+	}
+}
+
 void mapper5_reset(nessys_t* nes)
 {
 	mapper5_data* m5_data = (mapper5_data*)nes->mapper_data;
@@ -431,6 +456,8 @@ void mapper5_reset(nessys_t* nes)
 	nes->apu.reg = m5_data->mem;
 	nes->prg_rom_bank[NESSYS_APU_REG_START_BANK] = nes->apu.reg;
 	nes->prg_rom_bank_mask[NESSYS_APU_REG_START_BANK] = NESSYS_PRG_MEM_MASK;
+	mapper5_update_exp_chr_rom(nes);
+	nes->gfx->k2SurfUpdate(nes->st_exp_pattern, nes->prg_rom_base);
 }
 
 void mapper5_audio_tick(nessys_t* nes)
@@ -557,9 +584,10 @@ void mapper5_update_chr_map(nessys_t* nes, bool upper_reg_touched)
 	}
 }
 
-bool mapper5_bg_setup(nessys_t* nes, uint32_t phase)
+uint32_t mapper5_bg_setup(nessys_t* nes, uint32_t phase)
 {
 	mapper5_data* m5_data = (mapper5_data*)nes->mapper_data;
+	uint32_t mapper_setup = NESSYS_MAPPER_SETUP_DEFAULT;
 	if (m5_data->vsplit_mode & 0x80) {
 		// vertical split is enabled
 		int32_t split_pos = (m5_data->vsplit_mode & 0x1f) << 3;
@@ -611,14 +639,41 @@ bool mapper5_bg_setup(nessys_t* nes, uint32_t phase)
 			nes->ppu.scroll_y = m5_data->scroll_save_y;
 		}
 		// if phase is one, we're done; otherwise we're not
-		return (phase) ? true : false;
+		mapper_setup |= (phase) ? NESSYS_MAPPER_SETUP_DEFAULT : NESSYS_MAPPER_SETUP_DRAW_INCOMPLETE;
 	} else {
 		mapper5_update_chr_map(nes, true);
-		return true;
 	}
+	if (m5_data->exp_ram_mode == 0x01) {
+		mapper_setup |= NESSYS_MAPPER_SETUP_CUSTOM;
+		nes->gfx->k2CBUpdate(nes->cb_ppu, &(nes->ppu.reg));
+		// enable background rendering
+		// update constants
+		// nametable update
+		int i, index = NESSYS_CHR_NTB_WIN_MIN;
+		uint8_t buffer[4096];
+		for (i = 0; i < 4; i++) {
+			memcpy(buffer + (i << 10), nessys_ppu_mem(nes, index), 1024);
+			index += 1024;
+		}
+		nes->gfx->k2CBUpdate(nes->cb_nametable, buffer);
+
+		for (i = 0; i < 4; i++) {
+			memcpy(buffer + (i << 10), m5_data->mem + MAPPER5_ADDR_EXP_RAM_START_OFFSET, 1024);
+			index += 1024;
+		}
+		nes->gfx->k2CBUpdate(nes->cb_exp_nametable, buffer);
+
+		nes->gfx->k2SetScissorRect(nes->scissor_left_x, nes->scissor_top_y, nes->scissor_right_x, nes->scissor_bottom_y);
+		nes->gfx->k2AttachBlendState(nes->bs_mask);
+		nes->gfx->k2AttachDepthState(nes->ds_normal);
+		nes->gfx->k2AttachShaderGroup(nes->sg_exp_background);
+		nes->gfx->k2AttachConstantGroup(nes->cg_exp_background);
+		nes->gfx->k2AttachTextureGroup(nes->tg_exp_background);
+	}
+	return mapper_setup;
 }
 
-bool mapper5_sprite_setup(nessys_t* nes, uint32_t phase)
+uint32_t mapper5_sprite_setup(nessys_t* nes, uint32_t phase)
 {
 	mapper5_data* m5_data = (mapper5_data*)nes->mapper_data;
 	if (m5_data->vsplit_mode & 0x80) {
@@ -630,7 +685,7 @@ bool mapper5_sprite_setup(nessys_t* nes, uint32_t phase)
 		mapper5_update_nametable_map(nes);
 	}
 	mapper5_update_chr_map(nes, false);
-	return true;
+	return NESSYS_MAPPER_SETUP_DEFAULT;
 }
 
 void mapper5_cpu_setup(nessys_t* nes)
@@ -655,7 +710,26 @@ bool mapper5_write(nessys_t* nes, uint16_t addr, uint8_t data)
 	mapper5_data* m5_data = (mapper5_data*)nes->mapper_data;
 	uint16_t data_change = 0x0;
 	uint16_t result;
-	if (addr >= MAPPER5_ADDR_EXP_RAM_START && addr < MAPPER5_ADDR_EXP_RAM_START + MAPPER5_EXP_RAM_SIZE && m5_data->exp_ram_mode < 0x3) {
+	if (addr >= NESSYS_PRG_RAM_START) {
+		uint8_t bank = (addr >> MAPPER5_PRG_BANK_BASE_SIZE_LOG2) - 3;
+		bool is_ram = false;
+		switch(m5_data->prg_mode) {
+		case 3:
+			is_ram = (bank == 0) || (bank <= 3 && !(m5_data->prg_bank[bank] & 0x80));
+			break;
+		case 2:
+			is_ram = (bank == 3 && !(m5_data->prg_bank[3] & 0x80));
+		case 1:
+			is_ram |= (bank == 0 || (bank <= 2 && !(m5_data->prg_bank[2] & 0x80)));
+		case 0:
+			is_ram |= (bank == 0);
+			break;
+		}
+		if (is_ram) {
+			uint16_t b, o;
+			*nessys_mem(nes, addr, &b, &o) = data;
+		}
+	} else if (addr >= MAPPER5_ADDR_EXP_RAM_START && addr < MAPPER5_ADDR_EXP_RAM_START + MAPPER5_EXP_RAM_SIZE && m5_data->exp_ram_mode < 0x3) {
 		// access expanded ram
 		uint16_t mem_addr = addr - NESSYS_APU_WIN_MIN;
 		if (m5_data->exp_ram_mode < 0x2) {
@@ -738,6 +812,7 @@ bool mapper5_write(nessys_t* nes, uint16_t addr, uint8_t data)
 			break;
 		case MAPPER5_ADDR_EXP_RAM_MODE:
 			m5_data->exp_ram_mode = data & 0x3;
+			mapper5_update_exp_chr_rom(nes);
 			break;
 		case MAPPER5_ADDR_NTB_MAP:
 			data_change = m5_data->ntb_map;
@@ -787,7 +862,11 @@ bool mapper5_write(nessys_t* nes, uint16_t addr, uint8_t data)
 			mapper5_update_chr_map(nes, m5_data->upper_reg_touched);
 			break;
 		case MAPPER5_ADDR_UPPER_CHR_BANK:
+			data_change = m5_data->msb_chr_bank;
 			m5_data->msb_chr_bank = data & 0x3;
+			data_change ^= m5_data->msb_chr_bank;
+			if (m5_data->exp_ram_mode == 0x01 && data_change != 0) mapper5_update_exp_chr_rom(nes);
+			else data_change = 0x0;
 			break;
 		case MAPPER5_ADDR_VSPLIT_MODE:
 			data_change = m5_data->vsplit_mode;

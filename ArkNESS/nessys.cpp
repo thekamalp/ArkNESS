@@ -79,6 +79,8 @@ void nessys_init(nessys_t* nes)
 	vs = nes->gfx->k2CreateVertexShaderFromObj("..\\Debug\\screen_vs.cso");
 	ps = nes->gfx->k2CreatePixelShaderFromObj("..\\Debug\\background_ps.cso");
 	nes->sg_background = nes->gfx->k2CreateShaderGroup(vs, ps);
+	ps = nes->gfx->k2CreatePixelShaderFromObj("..\\Debug\\exp_background_ps.cso");
+	nes->sg_exp_background = nes->gfx->k2CreateShaderGroup(vs, ps);
 	ps = nes->gfx->k2CreatePixelShaderFromObj("..\\Debug\\fill_ps.cso");
 	nes->sg_fill = nes->gfx->k2CreateShaderGroup(vs, ps);
 	//vs = nes->gfx->k2CreateVertexShaderFromFile("..\\ArkNES\\sprite_vs.hlsl", "main");
@@ -117,6 +119,7 @@ void nessys_init(nessys_t* nes)
 	nes->cb_palette = nes->gfx->k2CreateConstantBuffer(256, K2ACCESS_UPDATE, NULL);
 	nes->cb_ppu = nes->gfx->k2CreateConstantBuffer(16, K2ACCESS_UPDATE, NULL);
 	nes->cb_sprite = nes->gfx->k2CreateConstantBuffer(256, K2ACCESS_UPDATE, NULL);
+	nes->cb_exp_nametable = nes->gfx->k2CreateConstantBuffer(4 * 1024, K2ACCESS_UPDATE, NULL);
 
 	k2constantelement celem[] = { 
 		{"ppu", nes->cb_ppu},
@@ -129,6 +132,17 @@ void nessys_init(nessys_t* nes)
 	celem[3].slot_name = "sprite";
 	celem[3].constant_buffer = nes->cb_sprite;
 	nes->cg_sprite = nes->gfx->k2CreateConstantGroup(nes->sg_sprite, 4, celem);
+
+	celem[2].slot_name = "exp_nametable";
+	celem[2].constant_buffer = nes->cb_exp_nametable;
+	celem[3].slot_name = "nametable";
+	celem[3].constant_buffer = nes->cb_nametable;
+	nes->cg_exp_background = nes->gfx->k2CreateConstantGroup(nes->sg_exp_background, 4, celem);
+
+	nes->st_exp_pattern = nes->gfx->k2CreateTexture(256, 64, K2FMT_RGBA32_UINT, K2ACCESS_UPDATE, NULL);
+
+	k2textureelement te[] = { {"exp_pattern", nes->st_exp_pattern->k2GetTexture(), NULL} };
+	nes->tg_exp_background = nes->gfx->k2CreateTextureGroup(nes->sg_exp_background, 1, 0, te, NULL);
 
 	nes->sb_main = nes->win->k2CreateSBuffer(NESSYS_SND_SAMPLES_PER_SECOND, NESSYS_SND_BITS_PER_SAMPLE, NESSYS_SND_SAMPLES);
 	void* sbuf_ptr = nes->sb_main->k2MapSBufForWrite(0, 2 * NESSYS_SND_SAMPLES);
@@ -591,41 +605,43 @@ void K2CALLBACK nessys_display(void* ptr)
 		nes->gfx->k2Draw();
 
 		if (nes->ppu.reg[0x1] & 0x08) {
-			bool done = false;
+			uint32_t mapper_setup = NESSYS_MAPPER_SETUP_DRAW_INCOMPLETE;
 			uint32_t phase = 0;
-			while (!done) {
+			while (mapper_setup & NESSYS_MAPPER_SETUP_DRAW_INCOMPLETE) {
 				nes->scissor_left_x = 80 - ((nes->ppu.reg[1] << 3) & 0x10);
 				nes->scissor_top_y = 2 * nes->scanline;
 				nes->scissor_right_x = 576;
 				nes->scissor_bottom_y = 480;
 
-				done = nes->mapper_bg_setup(nes, phase);
+				mapper_setup = nes->mapper_bg_setup(nes, phase);
 
-				nes->gfx->k2CBUpdate(nes->cb_ppu, &(nes->ppu.reg));
-				// enable background rendering
-				// update constants
-				// nametable update
-				index = NESSYS_CHR_NTB_WIN_MIN;
-				for (i = 0; i < 4; i++) {
-					memcpy(buffer + (i << 10), nessys_ppu_mem(nes, index), 1024);
-					index += 1024;
+				if (!(mapper_setup & NESSYS_MAPPER_SETUP_CUSTOM)) {
+					nes->gfx->k2CBUpdate(nes->cb_ppu, &(nes->ppu.reg));
+					// enable background rendering
+					// update constants
+					// nametable update
+					index = NESSYS_CHR_NTB_WIN_MIN;
+					for (i = 0; i < 4; i++) {
+						memcpy(buffer + (i << 10), nessys_ppu_mem(nes, index), 1024);
+						index += 1024;
+					}
+					nes->gfx->k2CBUpdate(nes->cb_nametable, buffer);
+
+					// pattern update
+					// copy pattern table at address 0x0, or 0x1000, if bit 4 of ppureg[0] is set, 1KB ata time
+					index = NESSYS_CHR_ROM_WIN_MIN + ((((uint32_t)nes->ppu.reg[0]) & 0x10) << 8);
+					for (i = 0; i < 4; i++) {
+						memcpy(buffer + (i << 10), nessys_ppu_mem(nes, index), 1024);
+						index += 1024;
+					}
+					nes->gfx->k2CBUpdate(nes->cb_pattern, buffer);
+
+					nes->gfx->k2SetScissorRect(nes->scissor_left_x, nes->scissor_top_y, nes->scissor_right_x, nes->scissor_bottom_y);
+					nes->gfx->k2AttachBlendState(nes->bs_mask);
+					nes->gfx->k2AttachDepthState(nes->ds_normal);
+					nes->gfx->k2AttachShaderGroup(nes->sg_background);
+					nes->gfx->k2AttachConstantGroup(nes->cg_background);
 				}
-				nes->gfx->k2CBUpdate(nes->cb_nametable, buffer);
-
-				// pattern update
-				// copy pattern table at address 0x0, or 0x1000, if bit 4 of ppureg[0] is set, 1KB ata time
-				index = NESSYS_CHR_ROM_WIN_MIN + ((((uint32_t)nes->ppu.reg[0]) & 0x10) << 8);
-				for (i = 0; i < 4; i++) {
-					memcpy(buffer + (i << 10), nessys_ppu_mem(nes, index), 1024);
-					index += 1024;
-				}
-				nes->gfx->k2CBUpdate(nes->cb_pattern, buffer);
-
-				nes->gfx->k2SetScissorRect(nes->scissor_left_x, nes->scissor_top_y, nes->scissor_right_x, nes->scissor_bottom_y);
-				nes->gfx->k2AttachBlendState(nes->bs_mask);
-				nes->gfx->k2AttachDepthState(nes->ds_normal);
-				nes->gfx->k2AttachShaderGroup(nes->sg_background);
-				nes->gfx->k2AttachConstantGroup(nes->cg_background);
 
 				nes->gfx->k2Draw();
 				phase++;
@@ -633,37 +649,38 @@ void K2CALLBACK nessys_display(void* ptr)
 		}
 
 		if (nes->ppu.reg[0x1] & 0x10) {
-			bool done = false;
+			uint32_t mapper_setup = NESSYS_MAPPER_SETUP_DRAW_INCOMPLETE;
 			uint32_t phase = 0;
-			while (!done) {
+			while (mapper_setup & NESSYS_MAPPER_SETUP_DRAW_INCOMPLETE) {
 				nes->scissor_left_x = 80 - ((nes->ppu.reg[1] << 2) & 0x10);
 				nes->scissor_top_y = 2 * nes->scanline;
 				nes->scissor_right_x = 576;
 				nes->scissor_bottom_y = 480;
 
-				done = nes->mapper_sprite_setup(nes, phase);
+				mapper_setup = nes->mapper_sprite_setup(nes, phase);
 
-				// enable sprite rendering
-				nes->gfx->k2AttachBlendState(nes->bs_mask);
-				nes->gfx->k2AttachDepthStateWithRef(nes->ds_sprite, 8);
-				nes->gfx->k2AttachRasterizerState(nes->rs_normal);
-				nes->gfx->k2SetScissorRect(nes->scissor_left_x, nes->scissor_top_y, nes->scissor_right_x, nes->scissor_bottom_y);
+				if (!(mapper_setup & NESSYS_MAPPER_SETUP_CUSTOM)) {
+					// enable sprite rendering
+					nes->gfx->k2AttachBlendState(nes->bs_mask);
+					nes->gfx->k2AttachDepthStateWithRef(nes->ds_sprite, 8);
+					nes->gfx->k2AttachRasterizerState(nes->rs_normal);
+					nes->gfx->k2SetScissorRect(nes->scissor_left_x, nes->scissor_top_y, nes->scissor_right_x, nes->scissor_bottom_y);
 
-				// update constants that are same for all sprites
-				index = NESSYS_CHR_ROM_WIN_MIN;
-				for (i = 0; i < 8; i++) {
-					memcpy(buffer + (i << 10), nessys_ppu_mem(nes, index), 1024);
-					index += 1024;
+					// update constants that are same for all sprites
+					index = NESSYS_CHR_ROM_WIN_MIN;
+					for (i = 0; i < 8; i++) {
+						memcpy(buffer + (i << 10), nessys_ppu_mem(nes, index), 1024);
+						index += 1024;
+					}
+					nes->gfx->k2CBUpdate(nes->cb_ppu, &(nes->ppu.reg));
+					nes->gfx->k2CBUpdate(nes->cb_pattern, buffer);
+					nes->gfx->k2CBUpdate(nes->cb_palette, palette + 2 * NESSYS_PPU_PAL_SIZE);
+					nes->gfx->k2CBUpdate(nes->cb_sprite, nes->ppu.oam);
+					nes->gfx->k2AttachConstantGroup(nes->cg_sprite);
+
+					nes->gfx->k2AttachInstancedVertexGroup(nes->vg_sprite, 4, 128);
+					nes->gfx->k2AttachShaderGroup(nes->sg_sprite);
 				}
-				nes->gfx->k2CBUpdate(nes->cb_ppu, &(nes->ppu.reg));
-				nes->gfx->k2CBUpdate(nes->cb_pattern, buffer);
-				nes->gfx->k2CBUpdate(nes->cb_palette, palette + 2 * NESSYS_PPU_PAL_SIZE);
-				nes->gfx->k2CBUpdate(nes->cb_sprite, nes->ppu.oam);
-				nes->gfx->k2AttachConstantGroup(nes->cg_sprite);
-
-				nes->gfx->k2AttachInstancedVertexGroup(nes->vg_sprite, 4, 128);
-				nes->gfx->k2AttachShaderGroup(nes->sg_sprite);
-
 				nes->gfx->k2Draw();
 
 				phase++;

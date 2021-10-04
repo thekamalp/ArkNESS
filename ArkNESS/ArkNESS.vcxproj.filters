@@ -58,5 +58,8 @@
     <FxCompile Include="fill_ps.hlsl">
       <Filter>Source Files</Filter>
     </FxCompile>
+    <FxCompile Include="exp_background_ps.hlsl">
+      <Filter>Source Files</Filter>
+    </FxCompile>
   </ItemGroup>
 </Project>

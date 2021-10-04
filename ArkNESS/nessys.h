@@ -223,6 +223,10 @@ const uint16_t NESSYS_APU_DMC_PERIOD_TABLE[16] = { 428, 380, 340, 320, 286, 254,
 
 const uint8_t NESSYS_MAPPER_FLAG_DATA_FROM_SOURCE = 0x01;
 
+const uint32_t NESSYS_MAPPER_SETUP_DEFAULT = 0x00;
+const uint32_t NESSYS_MAPPER_SETUP_DRAW_INCOMPLETE = 0x01;
+const uint32_t NESSYS_MAPPER_SETUP_CUSTOM = 0x2;
+
 struct nessys_apu_envelope_t {
 	uint8_t volume;
 	uint8_t divider;
@@ -331,8 +335,8 @@ struct nessys_cpu_backtrace_t {
 
 struct nessys_t {
 	uint32_t mapper_id;
-	bool (*mapper_bg_setup)(nessys_t* nes, uint32_t phase);
-	bool (*mapper_sprite_setup)(nessys_t* nes, uint32_t phase);
+	uint32_t (*mapper_bg_setup)(nessys_t* nes, uint32_t phase);
+	uint32_t (*mapper_sprite_setup)(nessys_t* nes, uint32_t phase);
 	void (*mapper_cpu_setup)(nessys_t* nes);
 	void (*mapper_audio_tick)(nessys_t* nes);
 	int16_t(*mapper_gen_sound)(nessys_t* nes);
@@ -382,6 +386,7 @@ struct nessys_t {
 	k2shadergroup* sg_background;
 	k2shadergroup* sg_fill;
 	k2shadergroup* sg_sprite;
+	k2shadergroup* sg_exp_background;
 	k2vertexgroup* vg_fullscreen;
 	k2vertexgroup* vg_sprite;
 	k2constantbuffer* cb_nametable;
@@ -389,9 +394,13 @@ struct nessys_t {
 	k2constantbuffer* cb_palette;
 	k2constantbuffer* cb_sprite;
 	k2constantbuffer* cb_ppu;
+	k2constantbuffer* cb_exp_nametable;
+	k2surf* st_exp_pattern;
 	k2constantgroup* cg_background;
 	k2constantgroup* cg_fill;
 	k2constantgroup* cg_sprite;
+	k2constantgroup* cg_exp_background;
+	k2texturegroup* tg_exp_background;
 	k2sbuf* sb_main;
 	uint32_t sbuf_frame_start;
 	uint32_t sbuf_offset;
