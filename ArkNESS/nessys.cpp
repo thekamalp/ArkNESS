@@ -491,15 +491,15 @@ void nessys_gen_sound(nessys_t* nes)
 		nes->sb_main->k2PlaySBuffer();
 		playing = true;
 
-		if ((nes->apu.reg[NESSYS_APU_FRAME_COUNTER_OFFSET] & 0xc0) == 0) {
-			// if were 4-step mode, and IRQ disable is 0, then we can produce an interrupt
-			uint32_t frac_until_frame_irq = (0x4 << NESSYS_SND_FRAME_FRAC_LOG2) - nes->apu.frame_frac_counter;
-			uint32_t cycles_until_frame_irq = frac_until_frame_irq / NESSYS_SND_SAMPLES_FRAC_PER_CYCLE;
-			if (nes->frame_irq_cycles == 0 || nes->frame_irq_cycles > cycles_until_frame_irq) nes->frame_irq_cycles = cycles_until_frame_irq;
-		} else {
-			nes->frame_irq_cycles = 0;
-			nes->apu.reg[NESSYS_APU_STATUS_OFFSET] &= ~0x40;
-		}
+		//if ((nes->apu.frame_counter & 0xc0) == 0) {
+		//	// if were 4-step mode, and IRQ disable is 0, then we can produce an interrupt
+		//	uint32_t frac_until_frame_irq = ((0x4* NESSYS_SND_SAMPLES_PER_BUFFER) << NESSYS_SND_FRAME_FRAC_LOG2) - (NESSYS_SND_SAMPLES_PER_BUFFER*nes->apu.frame_frac_counter);
+		//	uint32_t cycles_until_frame_irq = frac_until_frame_irq / (0x4*NESSYS_SND_SAMPLES_FRAC_PER_CYCLE);
+		//	if (nes->frame_irq_cycles == 0 /* || nes->frame_irq_cycles > cycles_until_frame_irq*/) nes->frame_irq_cycles = cycles_until_frame_irq;
+		//} else {
+		//	nes->frame_irq_cycles = 0;
+		//	nes->apu.reg[NESSYS_APU_STATUS_OFFSET] &= ~0x40;
+		//}
 		if ((nes->apu.reg[0x10] & 0x80 && nes->apu.dmc.length != 0)) {
 			// generate a dmc interrupt
 			uint32_t cyces_until_dmc_interrupt = ((uint32_t)nes->apu.dmc.bytes_remaining * 8) + nes->apu.dmc.bits_remaining;
@@ -862,6 +862,16 @@ void K2CALLBACK nessys_display(void* ptr)
 		// need to only do this if sprtes have changed position
 		nessys_gen_scanline_sprite_map(&(nes->ppu));
 
+		if ((nes->apu.frame_counter & 0xc0) == 0) {
+			// if were 4-step mode, and IRQ disable is 0, then we can produce an interrupt
+			//uint32_t frac_until_frame_irq = ((0x4 * NESSYS_SND_SAMPLES_PER_BUFFER) << NESSYS_SND_FRAME_FRAC_LOG2) - (NESSYS_SND_SAMPLES_PER_BUFFER * nes->apu.frame_frac_counter);
+			uint32_t cycles_until_frame_irq = NESSYS_PPU_CLK_PER_SCANLINE * NESSYS_PPU_SCANLINES_RENDERED - (NESSYS_PPU_CLK_PER_SCANLINE * nes->scanline) - nes->scanline_cycle;
+			if (nes->frame_irq_cycles == 0 /* || nes->frame_irq_cycles > cycles_until_frame_irq*/) nes->frame_irq_cycles = cycles_until_frame_irq;
+		} else {
+			nes->frame_irq_cycles = 0;
+			nes->apu.reg[NESSYS_APU_STATUS_OFFSET] &= ~0x40;
+		}
+
 		nes->mapper_cpu_setup(nes);
 		cycles = nessys_exec_cpu_cycles(nes, 0);
 		//printf("executed %d cycles; cycles remaining %d\n", cycles, nes->cycles_remaining);
@@ -1203,9 +1213,9 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 
 		uint32_t instruction_cycles = (NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles));
 		bool mapper_irq = (nes->mapper_irq_cycles > 0 && nes->mapper_irq_cycles < instruction_cycles);
-		bool frame_irq = false;// (nes->frame_irq_cycles > 0 && nes->frame_irq_cycles < instruction_cycles);
-		bool dmc_irq = false;// (nes->dmc_irq_cycles > 0 && nes->dmc_irq_cycles < instruction_cycles);
-		bool irq_interrupt = !(nes->reg.p & C6502_P_I) && mapper_irq;// || frame_irq || dmc_irq;
+		bool frame_irq = (nes->frame_irq_cycles > 0 && nes->frame_irq_cycles < instruction_cycles);
+		bool dmc_irq = (nes->dmc_irq_cycles > 0 && nes->dmc_irq_cycles < instruction_cycles);
+		bool irq_interrupt = !(nes->reg.p & C6502_P_I) && (mapper_irq || frame_irq || dmc_irq);
 		nes->cpu_cycle_inc = 0;
 		if (nes->cycles_remaining < (int32_t)instruction_cycles || vblank_interrupt) {
 			done = !vblank_interrupt;
@@ -1276,6 +1286,8 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 			nes->reg.pc += op->num_bytes;
 
 			// check if we read the PPU, or APU
+			bool clear_frame_irq = false;
+			bool clear_dmc_irq = false;
 			switch (bank) {
 			case NESSYS_PPU_REG_START_BANK:
 				switch (offset) {
@@ -1303,8 +1315,11 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					nes->apu.reg[NESSYS_APU_STATUS_OFFSET] |= (nes->apu.pulse[0].length) ? 0x1 : 0x0;
 					nes->apu.reg[NESSYS_APU_STATUS_OFFSET] |= (nes->apu.pulse[1].length) ? 0x2 : 0x0;
 					nes->apu.reg[NESSYS_APU_STATUS_OFFSET] |= (nes->apu.triangle.length) ? 0x4 : 0x0;
-					nes->apu.reg[NESSYS_APU_STATUS_OFFSET] |= (nes->apu.noise.length)    ? 0x8 : 0x0;
+					nes->apu.reg[NESSYS_APU_STATUS_OFFSET] |= (nes->apu.noise.length) ? 0x8 : 0x0;
 					nes->apu.reg[NESSYS_APU_STATUS_OFFSET] |= (nes->apu.dmc.bytes_remaining) ? 0x10 : 0x0;
+					clear_frame_irq = true;
+				} else if(offset == 0x13) {
+					clear_dmc_irq = true;
 				} else if (offset >= NESSYS_APU_SIZE) {
 					uint8_t* op = nes->mapper_read(nes, addr);
 					if (op) operand = op;
@@ -2084,10 +2099,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					break;
 				case 0x13:
 					nes->apu.dmc.length = (((uint16_t)nes->apu.reg[0x13]) << 4) + 1;
-					if ((nes->apu.reg[0x13] & 0x80) == 0) {
-						nes->dmc_irq_cycles = 0;
-						nes->apu.reg[NESSYS_APU_STATUS_OFFSET] &= ~0x80;
-					}
+					clear_dmc_irq = true;
 					break;
 				case NESSYS_APU_STATUS_OFFSET:
 					if (!(nes->apu.status & 0x1)) {
@@ -2123,16 +2135,17 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					//nes->apu.frame_frac_counter = 1 << NESSYS_SND_FRAME_FRAC_LOG2;
 					nes->apu.frame_frac_counter &= ~NESSYS_SND_FRAME_FRAC_MASK;
 					nes->apu.frame_frac_counter |= (nes->apu.frame_counter & 0x80) ? NESSYS_SND_FRAME_FRAC_MASK : 0;
+					if ((nes->apu.frame_counter & 0xc0) != 0) {
+						nes->frame_irq_cycles = 0;
+						nes->apu.reg[NESSYS_APU_STATUS_OFFSET] &= ~0x40;
+					}
 					break;
 				}
 			} else {
 				if (bank == NESSYS_APU_REG_START_BANK) {
 					switch (offset) {
 					case NESSYS_APU_STATUS_OFFSET:
-						if (nes->frame_irq_cycles == 1) {
-							nes->frame_irq_cycles = 0;
-							nes->apu.reg[NESSYS_APU_STATUS_OFFSET] &= ~0x40;
-						}
+						clear_frame_irq = true;
 						break;
 					case NESSYS_APU_JOYPAD0_OFFSET:
 					case NESSYS_APU_JOYPAD1_OFFSET:
@@ -2156,6 +2169,9 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					if ((nes->ppu.reg[2] & 0x80) && (data_change & 0x80) && (nes->ppu.reg[0] & 0x80)) nes->vblank_cycles = 1;
 					// we only re-render frame if bits that change rendering changes
 					ppu_ever_written = ppu_ever_written || (data_change & 0x39);
+					if (data_change & 0x10 && nes->scanline >= 48 && nes->scanline < 100) {
+						ppu_ever_written = true;
+					}
 					break;
 				case 0x1:
 					// we only re-render the frame if the register actually changed value
@@ -2247,6 +2263,18 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 			if (rom_write) {
 				if(skip_print == 0) printf("writing to rom a: 0x%x d: 0x%x\n", addr, result);
 				ppu_ever_written |= nes->mapper_write(nes, addr, (uint8_t)result);
+			}
+			if (clear_frame_irq) {
+				if (nes->apu.reg[NESSYS_APU_STATUS_OFFSET] & 0x40) {
+					nes->frame_irq_cycles = 0;
+					nes->apu.reg[NESSYS_APU_STATUS_OFFSET] &= ~0x40;
+				}
+			}
+			if (clear_dmc_irq) {
+				if ((nes->apu.reg[0x13] & 0x80) == 0) {
+					nes->dmc_irq_cycles = 0;
+					nes->apu.reg[NESSYS_APU_STATUS_OFFSET] &= ~0x80;
+				}
 			}
 			nes->cpu_cycle_inc = op->num_cycles + penalty_cycles;
 		}
