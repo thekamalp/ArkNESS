@@ -227,6 +227,8 @@ const uint32_t NESSYS_MAPPER_SETUP_DEFAULT = 0x00;
 const uint32_t NESSYS_MAPPER_SETUP_DRAW_INCOMPLETE = 0x01;
 const uint32_t NESSYS_MAPPER_SETUP_CUSTOM = 0x2;
 
+const uint32_t NESSYS_MAX_MID_SCAN_NTB_BANK_CHANGES = 4;
+
 struct nessys_apu_envelope_t {
 	uint8_t volume;
 	uint8_t divider;
@@ -371,6 +373,10 @@ struct nessys_t {
 	int32_t scissor_top_y;
 	int32_t scissor_right_x;
 	int32_t scissor_bottom_y;
+	uint32_t num_mid_scan_ntb_bank_changes;
+	uint32_t last_num_mid_scan_ntb_bank_changes;
+	uint8_t mid_scan_ntb_bank_change_position[NESSYS_MAX_MID_SCAN_NTB_BANK_CHANGES];
+	uint8_t* mid_scan_ntb_banks[NESSYS_MAX_MID_SCAN_NTB_BANK_CHANGES * 4];
 	uint32_t backtrace_entry;
 	nessys_cpu_backtrace_t backtrace[NESSYS_NUM_CPU_BACKTRACE_ENTRIES];
 	// rendering data structures
@@ -429,6 +435,7 @@ bool nessys_load_cart_filename(nessys_t* nes, const char* filename);
 bool nessys_load_cart(nessys_t* nes, FILE* fh);
 bool nessys_init_mapper(nessys_t* nes);
 void nessys_default_memmap(nessys_t* nes);
+bool nessys_add_mid_scan_bank_change(nessys_t* nes);
 uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles);
 void nessys_cleanup_mapper(nessys_t* nes);
 void nessys_unload_cart(nessys_t* nes);
@@ -448,4 +455,13 @@ inline uint8_t* nessys_ppu_mem(nessys_t* nes, uint16_t addr)
 	if (addr >= NESSYS_CHR_PAL_WIN_MIN) return nes->ppu.pal + (addr & NESSYS_PPU_PAL_MASK);
 	uint16_t b = addr >> NESSYS_CHR_BANK_SIZE_LOG2;
 	return nes->ppu.chr_rom_bank[b] + (addr & nes->ppu.chr_rom_bank_mask[b]);
+}
+
+inline uint8_t nessys_get_scan_position(nessys_t* nes)
+{
+	uint32_t position = nes->scanline_cycle + 28;
+	position &= ~0x7;
+	position -= nes->ppu.scroll[0];
+	if (position >= 256 || nes->scanline < 0) position = 0;
+	return (uint8_t)position;
 }

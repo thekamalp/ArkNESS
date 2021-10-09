@@ -566,6 +566,7 @@ void K2CALLBACK nessys_display(void* ptr)
 	nes->ppu.max_y = 240 + (nes->ppu.scroll_y & 0x100);// +256 * ((nes->ppu.scroll_y & 0xFF) >= 240);
 	nes->ppu.scroll_y_changed = true;
 	nes->cycles_remaining += NESSYS_PPU_SCANLINES_RENDERED_CLKS + NESSYS_PPU_SCANLINES_POST_RENDER_CLKS; // 241 scanlines
+	nes->last_num_mid_scan_ntb_bank_changes = 0;
 	int i, c, index;
 	do {
 		if (nes->ppu.scroll_y_changed) {
@@ -627,6 +628,26 @@ void K2CALLBACK nessys_display(void* ptr)
 					}
 					nes->gfx->k2CBUpdate(nes->cb_nametable, buffer);
 
+					nes->gfx->k2AttachBlendState(nes->bs_mask);
+					nes->gfx->k2AttachDepthState(nes->ds_normal);
+					nes->gfx->k2AttachShaderGroup(nes->sg_background);
+					nes->gfx->k2AttachConstantGroup(nes->cg_background);
+
+					uint8_t m;
+					uint16_t scan_right;
+					for (m = 0; m < nes->last_num_mid_scan_ntb_bank_changes; m++) {
+						scan_right = nes->mid_scan_ntb_bank_change_position[m];
+						scan_right |= (scan_right == 0) << 8;  // make 0 into 256
+						scan_right = 64 + 2 * scan_right;
+						memcpy(buffer + 0 * 1024, nes->mid_scan_ntb_banks[4 * m + 0], 1024);
+						memcpy(buffer + 1 * 1024, nes->mid_scan_ntb_banks[4 * m + 1], 1024);
+						memcpy(buffer + 2 * 1024, nes->mid_scan_ntb_banks[4 * m + 2], 1024);
+						memcpy(buffer + 3 * 1024, nes->mid_scan_ntb_banks[4 * m + 3], 1024);
+						nes->gfx->k2CBUpdate(nes->cb_pattern, buffer);
+						nes->gfx->k2SetScissorRect(nes->scissor_left_x, nes->scissor_top_y, scan_right - 1, nes->scissor_bottom_y);
+						nes->gfx->k2Draw();
+						nes->scissor_left_x = scan_right;
+					}
 					// pattern update
 					// copy pattern table at address 0x0, or 0x1000, if bit 4 of ppureg[0] is set, 1KB ata time
 					index = NESSYS_CHR_ROM_WIN_MIN + ((((uint32_t)nes->ppu.reg[0]) & 0x10) << 8);
@@ -637,10 +658,6 @@ void K2CALLBACK nessys_display(void* ptr)
 					nes->gfx->k2CBUpdate(nes->cb_pattern, buffer);
 
 					nes->gfx->k2SetScissorRect(nes->scissor_left_x, nes->scissor_top_y, nes->scissor_right_x, nes->scissor_bottom_y);
-					nes->gfx->k2AttachBlendState(nes->bs_mask);
-					nes->gfx->k2AttachDepthState(nes->ds_normal);
-					nes->gfx->k2AttachShaderGroup(nes->sg_background);
-					nes->gfx->k2AttachConstantGroup(nes->cg_background);
 				}
 
 				nes->gfx->k2Draw();
@@ -1082,6 +1099,27 @@ void nessys_dump_backtrace(nessys_t* nes)
 		entry++;
 		entry %= NESSYS_NUM_CPU_BACKTRACE_ENTRIES;
 	}
+}
+
+bool nessys_add_mid_scan_bank_change(nessys_t* nes)
+{
+	bool ppu_ever_written = false;
+	uint8_t scan_position = nessys_get_scan_position(nes);
+	if (scan_position == 0 && nes->num_mid_scan_ntb_bank_changes == 0) {
+		ppu_ever_written = true;
+	} else {
+		uint8_t chr_bank = (nes->ppu.reg[0] & 0x10) ? 4 : 0;
+		if (nes->num_mid_scan_ntb_bank_changes >= NESSYS_MAX_MID_SCAN_NTB_BANK_CHANGES)
+			nes->num_mid_scan_ntb_bank_changes = NESSYS_MAX_MID_SCAN_NTB_BANK_CHANGES - 1;
+		ppu_ever_written = (nes->mid_scan_ntb_bank_change_position[nes->num_mid_scan_ntb_bank_changes] != scan_position);
+		nes->mid_scan_ntb_bank_change_position[nes->num_mid_scan_ntb_bank_changes] = scan_position;
+		nes->mid_scan_ntb_banks[4 * nes->num_mid_scan_ntb_bank_changes + 0] = nes->ppu.chr_rom_bank[chr_bank + 0];
+		nes->mid_scan_ntb_banks[4 * nes->num_mid_scan_ntb_bank_changes + 1] = nes->ppu.chr_rom_bank[chr_bank + 1];
+		nes->mid_scan_ntb_banks[4 * nes->num_mid_scan_ntb_bank_changes + 2] = nes->ppu.chr_rom_bank[chr_bank + 2];
+		nes->mid_scan_ntb_banks[4 * nes->num_mid_scan_ntb_bank_changes + 3] = nes->ppu.chr_rom_bank[chr_bank + 3];
+		nes->num_mid_scan_ntb_bank_changes++;
+	}
+	return ppu_ever_written;
 }
 
 uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
@@ -2168,9 +2206,11 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					// if we toggle vblank enable from 0 to 1 while in vblank, retrigger a vblank
 					if ((nes->ppu.reg[2] & 0x80) && (data_change & 0x80) && (nes->ppu.reg[0] & 0x80)) nes->vblank_cycles = 1;
 					// we only re-render frame if bits that change rendering changes
-					ppu_ever_written = ppu_ever_written || (data_change & 0x39);
-					if (data_change & 0x10 && nes->scanline >= 48 && nes->scanline < 100) {
-						ppu_ever_written = true;
+					ppu_ever_written = ppu_ever_written || (data_change & 0x29);
+					if ((data_change & 0x10) && (nes->ppu.reg[1] & 0x08)) {
+						nes->ppu.reg[0] ^= 0x10;
+						ppu_ever_written = nessys_add_mid_scan_bank_change(nes) || ppu_ever_written;
+						nes->ppu.reg[0] ^= 0x10;
 					}
 					break;
 				case 0x1:
@@ -2351,6 +2391,13 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 			if (nes->scanline >= (int32_t)NESSYS_PPU_SCANLINES_RENDERED) {
 				nes->scanline -= NESSYS_PPU_SCANLINES_PER_FRAME;
 			}
+
+			if (nes->num_mid_scan_ntb_bank_changes != nes->last_num_mid_scan_ntb_bank_changes) {
+				ppu_ever_written = true;
+				nes->last_num_mid_scan_ntb_bank_changes = nes->num_mid_scan_ntb_bank_changes;
+			}
+			nes->num_mid_scan_ntb_bank_changes = 0;
+
 			// if we are on positive scanline, the we are in the display portion of the frame
 			// if so, we are done if ppu had been written, and rnedering is enabled
 			done |= (nes->scanline > 0) && ppu_ever_written && ((nes->ppu.reg[1] & 0x18) != 0x0) && (nes->scanline < NESSYS_PPU_SCANLINES_RENDERED);
