@@ -1,16 +1,12 @@
 // background_ps.hlsl
 // Renders the background tiles
 
-cbuffer nametable {
+cbuffer cbuf : register(b0) {
+	uint4 ppu;
+	uint4 sprite[16];
+	uint4 pattern[512];
+	float4 palette[32];
 	uint4 nametable[4 * 64];
-};
-
-cbuffer pattern {
-	uint4 pattern[256];
-};
-
-cbuffer palette {
-	float4 palette[16];
 };
 
 struct VS_OUTPUT {
@@ -44,14 +40,9 @@ float4 main(VS_OUTPUT i) : SV_TARGET
 
 	// get pattern index
 	uint4 name4 = nametable[name_table_index];
-//		(name_table_sel == 0) ? nametable0[name_table_index] :
-//		(name_table_sel == 1) ? nametable1[name_table_index] :
-//		(name_table_sel == 2) ? nametable2[name_table_index] : nametable3[name_table_index];
 	uint4 attrib4 = nametable[attrib_index];
-//		(name_table_sel == 0) ? attribtable0[attrib_index] :
-//		(name_table_sel == 1) ? attribtable1[attrib_index] :
-//		(name_table_sel == 2) ? attribtable2[attrib_index] : attribtable3[attrib_index];
 	uint pattern_index = (name4[name_table_sub_index] >> name_table_shift) & 0xFF;
+	pattern_index = pattern_index | ((ppu.x & 0x10) << 4);
 	uint4 pat4 = pattern[pattern_index];
 	// get the two planes, based on msb of y within the tile (bit 2)
 	uint2 pat2 = (n_pos.y & 0x4) ? pat4.ga : pat4.rb;

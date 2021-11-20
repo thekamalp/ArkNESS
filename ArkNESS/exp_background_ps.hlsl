@@ -2,26 +2,16 @@
 // Renders the background tiles
 // this is custom shader for MMC5 when using 16K patterns
 
-cbuffer nametable {
+cbuffer cbuf : register(b0) {
+	uint4 ppu;
+	uint4 sprite[16];
+	uint4 pattern[512];
+	float4 palette[32];
 	uint4 nametable[4 * 64];
-};
-
-cbuffer exp_nametable {
 	uint4 exp_nametable[4 * 64];
 };
 
-//cbuffer pattern {
-//	uint4 pattern0[256 * 16];
-//	uint4 pattern1[256 * 16];
-//	uint4 pattern2[256 * 16];
-//	uint4 pattern3[256 * 16];
-//};
-
 Texture2D <uint4> exp_pattern;
-
-cbuffer palette {
-	float4 palette[16];
-};
 
 struct VS_OUTPUT {
 	float4 pos : SV_POSITION;

@@ -6,7 +6,7 @@
 
 #include "nessys.h"
 
-const char* cart_file_name = "C:\\Users\\Arkesh\\emu\\roms\\nes\\Super Mario Bros. 3 (USA).nes";
+const char* cart_file_name = "C:\\Users\\Arkesh\\emu\\roms\\nes\\Double Dragon III - The Sacred Stones (USA).nes";
 
 int main()
 {
@@ -24,12 +24,13 @@ int main()
 		for (b = 0; b < NESSYS_PRG_NUM_BANKS; b++) {
 			printf("PRG_ROM bank[%d]: 0x%x\n", b, (uint32_t) nes_inst.prg_rom_bank[b]);
 		}
-		k2win::k2WindowLoop();
+		k3winObj::WindowLoop();
 		for (r = 0; r < 8; r++) {
 			printf("PPUREG[%d]=0x%x\n", r, nes_inst.ppu.reg[r]);
 		}
 	} else {
 		printf("Could not load cart file\n");
+		k3winObj::ExitLoop();
 	}
 	nessys_unload_cart(&nes_inst);
 	nessys_cleanup(&nes_inst);

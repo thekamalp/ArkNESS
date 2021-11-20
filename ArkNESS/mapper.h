@@ -225,6 +225,7 @@ struct mapper5_data {
 	uint8_t scroll_save[2];
 	uint16_t scroll_save_y;
 	nessys_apu_pulse_t pulse[2];
+	bool exp_surf_dirty;
 };
 
 // ------------------------------------------------------------

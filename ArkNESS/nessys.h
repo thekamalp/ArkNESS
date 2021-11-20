@@ -10,7 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <k2/k2win.hpp>
+#include <k3.h>
 
 // memory map constnts
 const uint32_t NESSYS_RAM_SIZE = 0x800;  // 2KB Ram
@@ -335,6 +335,19 @@ struct nessys_cpu_backtrace_t {
 	nessys_cpu_regs_t reg;
 };
 
+struct nessys_cbuffer_t {
+	uint32_t ppu[4];
+	uint32_t sprite[4 * 16];
+	uint32_t pattern[4 * 512];
+	float palette[4 * 32];
+	uint32_t nametable[4 * 4 * 64];
+};
+
+struct nessys_cbuffer_exp_t {
+	nessys_cbuffer_t cbuf;
+	uint32_t exp_nametable[4 * 4 * 64];
+};
+
 struct nessys_t {
 	uint32_t mapper_id;
 	uint32_t (*mapper_bg_setup)(nessys_t* nes, uint32_t phase);
@@ -380,37 +393,31 @@ struct nessys_t {
 	uint32_t backtrace_entry;
 	nessys_cpu_backtrace_t backtrace[NESSYS_NUM_CPU_BACKTRACE_ENTRIES];
 	// rendering data structures
-	k2win* win;
-	k2gfx* gfx;
-	k2rendergroup* rg_win;
-	k2blendstate* bs_normal;
-	k2blendstate* bs_mask;
-	k2depthstate* ds_none;
-	k2depthstate* ds_normal;
-	k2depthstate* ds_sprite;
-	k2rasterizerstate* rs_normal;
-	k2shadergroup* sg_background;
-	k2shadergroup* sg_fill;
-	k2shadergroup* sg_sprite;
-	k2shadergroup* sg_exp_background;
-	k2vertexgroup* vg_fullscreen;
-	k2vertexgroup* vg_sprite;
-	k2constantbuffer* cb_nametable;
-	k2constantbuffer* cb_pattern;
-	k2constantbuffer* cb_palette;
-	k2constantbuffer* cb_sprite;
-	k2constantbuffer* cb_ppu;
-	k2constantbuffer* cb_exp_nametable;
-	k2surf* st_exp_pattern;
-	k2constantgroup* cg_background;
-	k2constantgroup* cg_fill;
-	k2constantgroup* cg_sprite;
-	k2constantgroup* cg_exp_background;
-	k2texturegroup* tg_exp_background;
-	k2sbuf* sb_main;
+	static const uint32_t NUM_GPU_VERSIONS = 2;
+	static const uint32_t NUM_CPU_VERSIONS = 16;
+	k3win win;
+	k3gfx gfx;
+	k3surf surf_depth;
+	k3cmdBuf cmd_buf;
+	k3fence fence;
+	k3gfxState st_background;
+	k3gfxState st_fill;
+	k3gfxState st_sprite;
+	k3gfxState st_exp_background;
+	k3buffer vb_fullscreen;
+	k3buffer vb_sprite;
+	uint32_t cb_main_cpu_version;
+	uint32_t cb_main_gpu_version;
+	uint32_t surf_exp_cpu_version;
+	uint32_t surf_exp_gpu_version;
+	k3uploadBuffer cb_upload[NUM_CPU_VERSIONS];
+	k3buffer cb_main[NUM_GPU_VERSIONS];
+	k3uploadImage surf_upload_exp_pattern[NUM_CPU_VERSIONS];
+	k3surf surf_exp_pattern[NUM_GPU_VERSIONS];
+	k3soundBuf sb_main;
 	uint32_t sbuf_frame_start;
 	uint32_t sbuf_offset;
-	k2timer* timer;
+	k3timer timer;
 };
 
 #include "c6502.h"

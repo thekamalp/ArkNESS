@@ -433,13 +433,25 @@ void mapper5_update_exp_chr_rom(nessys_t* nes)
 		uint32_t offset = (256 * 1024 * m5_data->msb_chr_bank) % size;
 		if (offset + 256 * 1024 > size) {
 			size -= offset;
-			uint8_t buffer[256 * 1024];
-			memcpy(buffer, base + offset, size);
-			nes->gfx->k2SurfUpdate(nes->st_exp_pattern, buffer);
-		} else {
-			nes->gfx->k2SurfUpdate(nes->st_exp_pattern, base + offset);
+			//uint8_t buffer[256 * 1024];
+			//memcpy(buffer, base + offset, size);
+			//nes->gfx->k2SurfUpdate(nes->st_exp_pattern, buffer);
+		//} else {
+			//nes->gfx->k2SurfUpdate(nes->st_exp_pattern, base + offset);
 		}
+		void* buffer = nes->surf_upload_exp_pattern[nes->surf_exp_cpu_version]->MapForWrite();
+		memcpy(buffer, base + offset, size);
+		nes->surf_upload_exp_pattern[nes->surf_exp_cpu_version]->Unmap();
+		nes->cmd_buf->TransitionResource(nes->surf_exp_pattern[nes->surf_exp_gpu_version]->GetResource(), k3resourceState::COPY_DEST);
+		nes->cmd_buf->UploadImage(nes->surf_upload_exp_pattern[nes->surf_exp_cpu_version], nes->surf_exp_pattern[nes->surf_exp_gpu_version]->GetResource());
+		nes->cmd_buf->TransitionResource(nes->surf_exp_pattern[nes->surf_exp_gpu_version]->GetResource(), k3resourceState::SHADER_RESOURCE);
+		nes->cmd_buf->SetShaderView(1, nes->surf_exp_pattern[nes->surf_exp_gpu_version]);
+		nes->surf_exp_cpu_version++;
+		nes->surf_exp_gpu_version++;
+		if (nes->surf_exp_cpu_version >= nessys_t::NUM_CPU_VERSIONS) nes->surf_exp_cpu_version = 0;
+		if (nes->surf_exp_gpu_version >= nessys_t::NUM_GPU_VERSIONS) nes->surf_exp_gpu_version = 0;
 	}
+	m5_data->exp_surf_dirty = false;
 }
 
 void mapper5_reset(nessys_t* nes)
@@ -456,8 +468,25 @@ void mapper5_reset(nessys_t* nes)
 	nes->apu.reg = m5_data->mem;
 	nes->prg_rom_bank[NESSYS_APU_REG_START_BANK] = nes->apu.reg;
 	nes->prg_rom_bank_mask[NESSYS_APU_REG_START_BANK] = NESSYS_PRG_MEM_MASK;
+
+	nes->cmd_buf->Reset();
 	mapper5_update_exp_chr_rom(nes);
-	nes->gfx->k2SurfUpdate(nes->st_exp_pattern, nes->prg_rom_base);
+
+	void* buffer = nes->surf_upload_exp_pattern[nes->surf_exp_cpu_version]->MapForWrite();
+	memcpy(buffer, nes->prg_rom_base, 256 * 1024);
+	nes->surf_upload_exp_pattern[nes->surf_exp_cpu_version]->Unmap();
+	nes->cmd_buf->TransitionResource(nes->surf_exp_pattern[nes->surf_exp_gpu_version]->GetResource(), k3resourceState::COPY_DEST);
+	nes->cmd_buf->UploadImage(nes->surf_upload_exp_pattern[nes->surf_exp_cpu_version], nes->surf_exp_pattern[nes->surf_exp_gpu_version]->GetResource());
+	//nes->cmd_buf->TransitionResource(nes->surf_exp_pattern[nes->surf_exp_gpu_version]->GetResource(), k3resourceState::SHADER_RESOURCE);
+	//nes->cmd_buf->SetShaderView(1, nes->surf_exp_pattern[nes->surf_exp_gpu_version]);
+	nes->surf_exp_cpu_version++;
+	nes->surf_exp_gpu_version++;
+	if (nes->surf_exp_cpu_version >= nessys_t::NUM_CPU_VERSIONS) nes->surf_exp_cpu_version = 0;
+	if (nes->surf_exp_gpu_version >= nessys_t::NUM_GPU_VERSIONS) nes->surf_exp_gpu_version = 0;
+	//nes->gfx->k2SurfUpdate(nes->st_exp_pattern, nes->prg_rom_base);
+	nes->cmd_buf->Close();
+	nes->gfx->SubmitCmdBuf(nes->cmd_buf);
+
 }
 
 void mapper5_audio_tick(nessys_t* nes)
@@ -588,6 +617,21 @@ uint32_t mapper5_bg_setup(nessys_t* nes, uint32_t phase)
 {
 	mapper5_data* m5_data = (mapper5_data*)nes->mapper_data;
 	uint32_t mapper_setup = NESSYS_MAPPER_SETUP_DEFAULT;
+
+	if(m5_data->exp_surf_dirty) mapper5_update_exp_chr_rom(nes);
+
+	int i, c, index;
+	float palette[4 * NESSYS_PPU_PAL_SIZE];
+	for (i = 0; i < NESSYS_PPU_PAL_SIZE; i++) {
+		for (c = 0; c < 3; c++) {
+			index = ((i & 0x3) == 0) ? 0 : i;
+			palette[4 * i + c] = NESSYS_PPU_PALETTE[3 * nes->ppu.pal[index] + c];
+		}
+		palette[4 * i + 3] = ((i & 0x3) == 0) ? 0.0f : 1.0f;
+	}
+
+	nessys_cbuffer_exp_t* cb_exp_data = static_cast<nessys_cbuffer_exp_t*>(nes->cb_upload[nes->cb_main_cpu_version]->MapForWrite(sizeof(nessys_cbuffer_exp_t)));
+
 	if (m5_data->vsplit_mode & 0x80) {
 		// vertical split is enabled
 		int32_t split_pos = (m5_data->vsplit_mode & 0x1f) << 3;
@@ -645,31 +689,59 @@ uint32_t mapper5_bg_setup(nessys_t* nes, uint32_t phase)
 	}
 	if (m5_data->exp_ram_mode == 0x01) {
 		mapper_setup |= NESSYS_MAPPER_SETUP_CUSTOM;
-		nes->gfx->k2CBUpdate(nes->cb_ppu, &(nes->ppu.reg));
-		// enable background rendering
-		// update constants
-		// nametable update
-		int i, index = NESSYS_CHR_NTB_WIN_MIN;
-		uint8_t buffer[4096];
-		for (i = 0; i < 4; i++) {
-			memcpy(buffer + (i << 10), nessys_ppu_mem(nes, index), 1024);
-			index += 1024;
-		}
-		nes->gfx->k2CBUpdate(nes->cb_nametable, buffer);
 
 		for (i = 0; i < 4; i++) {
-			memcpy(buffer + (i << 10), m5_data->mem + MAPPER5_ADDR_EXP_RAM_START_OFFSET, 1024);
+			memcpy(cb_exp_data->exp_nametable + (i << 8), m5_data->mem + MAPPER5_ADDR_EXP_RAM_START_OFFSET, 1024);
 			index += 1024;
 		}
-		nes->gfx->k2CBUpdate(nes->cb_exp_nametable, buffer);
+		//nes->gfx->k2CBUpdate(nes->cb_exp_nametable, buffer);
 
-		nes->gfx->k2SetScissorRect(nes->scissor_left_x, nes->scissor_top_y, nes->scissor_right_x, nes->scissor_bottom_y);
-		nes->gfx->k2AttachBlendState(nes->bs_mask);
-		nes->gfx->k2AttachDepthState(nes->ds_normal);
-		nes->gfx->k2AttachShaderGroup(nes->sg_exp_background);
-		nes->gfx->k2AttachConstantGroup(nes->cg_exp_background);
-		nes->gfx->k2AttachTextureGroup(nes->tg_exp_background);
+		k3rect scissor;
+		scissor.x = nes->scissor_left_x;
+		scissor.y = nes->scissor_top_y;
+		scissor.width = nes->scissor_right_x - nes->scissor_left_x;
+		scissor.height = nes->scissor_bottom_y - nes->scissor_top_y;
+		nes->cmd_buf->SetScissor(&scissor);
+		nes->cmd_buf->SetGfxState(nes->st_exp_background);
+
+		//nes->gfx->k2SetScissorRect(nes->scissor_left_x, nes->scissor_top_y, nes->scissor_right_x, nes->scissor_bottom_y);
+		//nes->gfx->k2AttachBlendState(nes->bs_mask);
+		//nes->gfx->k2AttachDepthState(nes->ds_normal);
+		//nes->gfx->k2AttachShaderGroup(nes->sg_exp_background);
+		//nes->gfx->k2AttachConstantGroup(nes->cg_exp_background);
+		//nes->gfx->k2AttachTextureGroup(nes->tg_exp_background);
 	}
+	memcpy(cb_exp_data->cbuf.ppu, nes->ppu.reg, 4 * sizeof(uint32_t));
+	memcpy(cb_exp_data->cbuf.sprite, nes->ppu.oam, 4 * 16 * sizeof(uint32_t));
+	index = NESSYS_CHR_ROM_WIN_MIN;
+	for (i = 0; i < 8; i++) {
+		memcpy(cb_exp_data->cbuf.pattern + (i << 8), nessys_ppu_mem(nes, index), 1024);
+		index += 1024;
+	}
+	memcpy(cb_exp_data->cbuf.palette, palette, 4 * 32 * sizeof(float));
+	//nes->gfx->k2CBUpdate(nes->cb_ppu, &(nes->ppu.reg));
+	// enable background rendering
+	// update constants
+	// nametable update
+	index = NESSYS_CHR_NTB_WIN_MIN;
+	for (i = 0; i < 4; i++) {
+		memcpy(cb_exp_data->cbuf.nametable + (i << 8), nessys_ppu_mem(nes, index), 1024);
+		index += 1024;
+	}
+	//nes->gfx->k2CBUpdate(nes->cb_nametable, buffer);
+	nes->cb_upload[nes->cb_main_cpu_version]->Unmap();
+
+	nes->cmd_buf->TransitionResource(nes->cb_main[nes->cb_main_gpu_version]->GetResource(), k3resourceState::COPY_DEST);
+	nes->cmd_buf->UploadBuffer(nes->cb_upload[nes->cb_main_cpu_version], nes->cb_main[nes->cb_main_gpu_version]->GetResource());
+	nes->cmd_buf->TransitionResource(nes->cb_main[nes->cb_main_gpu_version]->GetResource(), k3resourceState::SHADER_BUFFER);
+	nes->cmd_buf->SetConstantBuffer(0, nes->cb_main[nes->cb_main_gpu_version]);
+	//nes->cmd_buf->TransitionResource(nes->surf_exp_pattern[nes->surf_exp_gpu_version]->GetResource(), k3resourceState::SHADER_RESOURCE);
+	//nes->cmd_buf->SetShaderView(1, nes->surf_exp_pattern[nes->surf_exp_gpu_version]);
+	nes->cb_main_cpu_version++;
+	nes->cb_main_gpu_version++;
+	if (nes->cb_main_cpu_version >= nessys_t::NUM_CPU_VERSIONS) nes->cb_main_cpu_version = 0;
+	if (nes->cb_main_gpu_version >= nessys_t::NUM_GPU_VERSIONS) nes->cb_main_gpu_version = 0;
+
 	return mapper_setup;
 }
 
@@ -685,6 +757,42 @@ uint32_t mapper5_sprite_setup(nessys_t* nes, uint32_t phase)
 		mapper5_update_nametable_map(nes);
 	}
 	mapper5_update_chr_map(nes, false);
+
+	int i, c, index;
+	float palette[4 * NESSYS_PPU_PAL_SIZE];
+	for (i = 0; i < NESSYS_PPU_PAL_SIZE; i++) {
+		for (c = 0; c < 3; c++) {
+			index = ((i & 0x3) == 0) ? 0 : i;
+			palette[4 * i + c] = NESSYS_PPU_PALETTE[3 * nes->ppu.pal[index] + c];
+		}
+		palette[4 * i + 3] = ((i & 0x3) == 0) ? 0.0f : 1.0f;
+	}
+
+	nessys_cbuffer_t* cb_data = static_cast<nessys_cbuffer_t*>(nes->cb_upload[nes->cb_main_cpu_version]->MapForWrite(sizeof(nessys_cbuffer_exp_t)));
+	memcpy(cb_data->ppu, nes->ppu.reg, 4 * sizeof(uint32_t));
+	memcpy(cb_data->sprite, nes->ppu.oam, 4 * 16 * sizeof(uint32_t));
+	index = NESSYS_CHR_ROM_WIN_MIN;
+	for (i = 0; i < 8; i++) {
+		memcpy(cb_data->pattern + (i << 8), nessys_ppu_mem(nes, index), 1024);
+		index += 1024;
+	}
+	memcpy(cb_data->palette, palette, 4 * 32 * sizeof(float));
+	index = NESSYS_CHR_NTB_WIN_MIN;
+	for (i = 0; i < 4; i++) {
+		memcpy(cb_data->nametable + (i << 8), nessys_ppu_mem(nes, index), 1024);
+		index += 1024;
+	}
+	nes->cb_upload[nes->cb_main_cpu_version]->Unmap();
+
+	nes->cmd_buf->TransitionResource(nes->cb_main[nes->cb_main_gpu_version]->GetResource(), k3resourceState::COPY_DEST);
+	nes->cmd_buf->UploadBuffer(nes->cb_upload[nes->cb_main_cpu_version], nes->cb_main[nes->cb_main_gpu_version]->GetResource());
+	nes->cmd_buf->TransitionResource(nes->cb_main[nes->cb_main_gpu_version]->GetResource(), k3resourceState::SHADER_BUFFER);
+	nes->cmd_buf->SetConstantBuffer(0, nes->cb_main[nes->cb_main_gpu_version]);
+	nes->cb_main_cpu_version++;
+	nes->cb_main_gpu_version++;
+	if (nes->cb_main_cpu_version >= nessys_t::NUM_CPU_VERSIONS) nes->cb_main_cpu_version = 0;
+	if (nes->cb_main_gpu_version >= nessys_t::NUM_GPU_VERSIONS) nes->cb_main_gpu_version = 0;
+
 	return NESSYS_MAPPER_SETUP_DEFAULT;
 }
 
@@ -811,8 +919,8 @@ bool mapper5_write(nessys_t* nes, uint16_t addr, uint8_t data)
 			m5_data->prg_ram_protect2 = data & 0x3;
 			break;
 		case MAPPER5_ADDR_EXP_RAM_MODE:
+			m5_data->exp_surf_dirty = true;
 			m5_data->exp_ram_mode = data & 0x3;
-			mapper5_update_exp_chr_rom(nes);
 			break;
 		case MAPPER5_ADDR_NTB_MAP:
 			data_change = m5_data->ntb_map;
@@ -865,7 +973,8 @@ bool mapper5_write(nessys_t* nes, uint16_t addr, uint8_t data)
 			data_change = m5_data->msb_chr_bank;
 			m5_data->msb_chr_bank = data & 0x3;
 			data_change ^= m5_data->msb_chr_bank;
-			if (m5_data->exp_ram_mode == 0x01 && data_change != 0) mapper5_update_exp_chr_rom(nes);
+			if (m5_data->exp_ram_mode == 0x01 && data_change != 0)
+				m5_data->exp_surf_dirty = true;
 			else data_change = 0x0;
 			break;
 		case MAPPER5_ADDR_VSPLIT_MODE:

@@ -13,148 +13,201 @@ void nessys_init(nessys_t* nes)
 	nes->apu.reg = nes->apu.reg_mem;
 	nes->apu.pulse[0].env.flags = NESSYS_APU_PULSE_FLAG_SWEEP_ONES_COMP;
 	nes->apu.noise.shift_reg = 0x01;
-	k2image::k2Initialize();
-	k2error_SetHandler(k2error_StdOutHandler);
-	k2win::k2SetGfxType(K2GFX_DIRECTX_11);
-	nes->win = k2win::CreateWindowedWithFormat("ArkNES", 0, 0, 640, 480, K2FMT_RGBA8_UNORM, K2FMT_D24_UNORM_S8_UINT);
-	nes->win->k2SetDataPtr(nes);
-	nes->gfx = nes->win->k2GetGfx();
-	nes->rg_win = nes->win->k2GetRenderGroup();
-	nes->win->k2SetVsyncInterval(1);
+	nes->win = k3winObj::CreateWindowedWithFormat("ArkNESS", 0, 0, 640, 480, k3fmt::RGBA8_UNORM, 2 * nessys_t::NUM_GPU_VERSIONS, 0);
+	nes->win->SetVisible(true);
+	nes->win->SetCursorVisible(true);
+	nes->win->SetDataPtr(nes);
+	nes->gfx = nes->win->GetGfx();
+	nes->win->SetVsyncInterval(1);
+	nes->cmd_buf = nes->gfx->CreateCmdBuf();
+	nes->fence = nes->gfx->CreateFence();
+
+	// Create depth/stencil surface
+	k3resourceDesc rdesc = { 0 };
+	rdesc.width = 640;
+	rdesc.height = 480;
+	rdesc.depth = 1;
+	rdesc.mip_levels = 1;
+	rdesc.num_samples = 1;
+	rdesc.format = k3fmt::D24_UNORM_S8_UINT;
+	k3viewDesc vdesc = { 0 };
+	nes->surf_depth = nes->gfx->CreateSurface(&rdesc, &vdesc, NULL, NULL);
+
+	// create shader bindings
+	k3bindingParam bind_params[2];
+	bind_params[0].type = k3bindingType::VIEW_SET;
+	bind_params[0].view_set_desc.type = k3shaderBindType::CBV;
+	bind_params[0].view_set_desc.num_views = 1;
+	bind_params[0].view_set_desc.reg = 0;
+	bind_params[0].view_set_desc.space = 0;
+	bind_params[1].type = k3bindingType::VIEW_SET;
+	bind_params[1].view_set_desc.type = k3shaderBindType::SRV;
+	bind_params[1].view_set_desc.num_views = 1;
+	bind_params[1].view_set_desc.reg = 0;
+	bind_params[1].view_set_desc.space = 0;
+	k3shaderBinding shader_binding = nes->gfx->CreateShaderBinding(2, bind_params, 0, NULL);
 
 	// initialize render states
-	k2blendstate_desc bs_desc = { 0 };
-	k2depthstate_desc ds_desc = { 0 };
-	k2rasterizerstate_desc rs_desc = { 0 };
+	k3blendState bs_normal = { 0 };
+	bs_normal.alpha_to_mask = false;
+	bs_normal.independent_blend = false;
+	bs_normal.blend_op[0].blend_enable = false;
+	bs_normal.blend_op[0].rop_enable = false;
+	bs_normal.blend_op[0].rt_write_mask = 0xf;
 
-	bs_desc.alphaToCoverageEnable = false;
-	bs_desc.independentBlendEnable = false;
-	bs_desc.rt[0].blendEnable = false;
-	bs_desc.rt[0].writemask = 0x0f;
-	nes->bs_normal = nes->gfx->k2CreateBlendState(&bs_desc);
+	k3blendState bs_mask = bs_normal;
+	bs_mask.alpha_to_mask = true;
 
-	bs_desc.alphaToCoverageEnable = true;
-	nes->bs_mask = nes->gfx->k2CreateBlendState(&bs_desc);
+	k3depthState ds_none = { 0 };
+	ds_none.depth_enable = false;
+	ds_none.depth_write_enable = false;
+	ds_none.depth_test = k3testFunc::ALWAYS;
+	ds_none.stencil_enable = false;
 
-	ds_desc.zEnable = false;
-	ds_desc.zWriteEnable = false;
-	ds_desc.zFunc = K2COMPARE_ALWAYS;
-	ds_desc.stencilEnable = false;
-	nes->ds_none = nes->gfx->k2CreateDepthState(&ds_desc);
+	k3depthState ds_normal = ds_none;
+	ds_normal.depth_enable = true;
+	ds_normal.depth_write_enable = true;
+	ds_normal.depth_test = k3testFunc::LESS_EQUAL;
+	ds_normal.stencil_enable = false;
 
-	ds_desc.zEnable = true;
-	ds_desc.zWriteEnable = true;
-	ds_desc.zFunc = K2COMPARE_LEQUAL;
-	ds_desc.stencilEnable = false;
-	nes->ds_normal = nes->gfx->k2CreateDepthState(&ds_desc);
+	k3depthState ds_sprite = ds_normal;
+	ds_sprite.depth_write_enable = false;
+	ds_sprite.stencil_enable = true;
+	ds_sprite.stencil_read_mask = 0xff;
+	ds_sprite.stencil_write_mask = 0xff;
+	ds_sprite.back.stencil_test = k3testFunc::NEVER;
+	ds_sprite.back.fail_op = k3stencilOp::INCR_SAT;
+	ds_sprite.back.z_fail_op = k3stencilOp::INCR_SAT;
+	ds_sprite.back.pass_op = k3stencilOp::INCR_SAT;
+	ds_sprite.front.stencil_test = k3testFunc::GREATER;
+	ds_sprite.front.fail_op = k3stencilOp::KEEP;
+	ds_sprite.front.z_fail_op = k3stencilOp::REPLACE;
+	ds_sprite.front.pass_op = k3stencilOp::REPLACE;
 
-	ds_desc.zWriteEnable = false;
-	ds_desc.stencilEnable = true;
-	ds_desc.stencilTestMask = 0xff;
-	ds_desc.stencilWriteMask = 0xff;
-	ds_desc.backFace.stencilFunc = K2COMPARE_NEVER;
-	ds_desc.backFace.stencilFailOp = K2STENCILOP_INCR_SAT;
-	ds_desc.backFace.zFailOp = K2STENCILOP_INCR_SAT;
-	ds_desc.backFace.passOp = K2STENCILOP_INCR_SAT;
-	ds_desc.frontFace.stencilFunc = K2COMPARE_GREATER;
-	ds_desc.frontFace.stencilFailOp = K2STENCILOP_KEEP;
-	ds_desc.frontFace.zFailOp = K2STENCILOP_REPLACE;
-	ds_desc.frontFace.passOp = K2STENCILOP_REPLACE;
-	nes->ds_sprite = nes->gfx->k2CreateDepthState(&ds_desc);
+	// Load shaders
+	k3shader screen_vs = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\screen_vs.cso");
+	k3shader sprite_vs = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\sprite_vs.cso");
+	k3shader fill_ps = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\fill_ps.cso");
+	k3shader sprite_ps = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\sprite_ps.cso");
+	k3shader background_ps = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\background_ps.cso");
+	k3shader exp_background_ps = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\exp_background_ps.cso");
 
-	rs_desc.fillMode = K2FILL_SOLID;
-	rs_desc.cullMode = K2CULL_NONE;
-	rs_desc.frontCCW = false;
-	rs_desc.zClipEnable = false;
-	rs_desc.scissorEnable = true;
-	rs_desc.multisampleEnable = true;
-	rs_desc.aaLineEnable = true;
-	nes->rs_normal = nes->gfx->k2CreateRasterizerState(&rs_desc);
+	// setup input format
+	k3inputElement in_elem[1];
+	in_elem[0].name = "POSITION";
+	in_elem[0].index = 0;
+	in_elem[0].format = k3fmt::RG32_FLOAT;
+	in_elem[0].slot = 0;
+	in_elem[0].offset = 0;
+	in_elem[0].instance_step = 0;
+	in_elem[0].in_type = k3inputType::VERTEX;
 
-	// initialize shaders
-	k2vertexshader* vs;
-	k2pixelshader* ps;
-	//vs = nes->gfx->k2CreateVertexShaderFromFile("..\\ArkNES\\screen_vs.hlsl", "main");
-	//ps = nes->gfx->k2CreatePixelShaderFromFile("..\\ArkNES\\background_ps.hlsl", "main");
-	vs = nes->gfx->k2CreateVertexShaderFromObj("..\\Debug\\screen_vs.cso");
-	ps = nes->gfx->k2CreatePixelShaderFromObj("..\\Debug\\background_ps.cso");
-	nes->sg_background = nes->gfx->k2CreateShaderGroup(vs, ps);
-	ps = nes->gfx->k2CreatePixelShaderFromObj("..\\Debug\\exp_background_ps.cso");
-	nes->sg_exp_background = nes->gfx->k2CreateShaderGroup(vs, ps);
-	ps = nes->gfx->k2CreatePixelShaderFromObj("..\\Debug\\fill_ps.cso");
-	nes->sg_fill = nes->gfx->k2CreateShaderGroup(vs, ps);
-	//vs = nes->gfx->k2CreateVertexShaderFromFile("..\\ArkNES\\sprite_vs.hlsl", "main");
-	//ps = nes->gfx->k2CreatePixelShaderFromFile("..\\ArkNES\\sprite_ps.hlsl", "main");
-	vs = nes->gfx->k2CreateVertexShaderFromObj("..\\Debug\\sprite_vs.cso");
-	ps = nes->gfx->k2CreatePixelShaderFromObj("..\\Debug\\sprite_ps.cso");
-	nes->sg_sprite = nes->gfx->k2CreateShaderGroup(vs, ps);
+	// create gfx states
+	k3gfxStateDesc gfx_state_desc = { 0 };
+	gfx_state_desc.num_input_elements = 1;
+	gfx_state_desc.input_elements = in_elem;
+	gfx_state_desc.shader_binding = shader_binding;
+	gfx_state_desc.sample_mask = ~0;
+	gfx_state_desc.rast_state.fill_mode = k3fill::SOLID;
+	gfx_state_desc.rast_state.cull_mode = k3cull::NONE;
+	gfx_state_desc.rast_state.front_counter_clockwise = false;
+	gfx_state_desc.rast_state.depth_clip_enable = false;
+	gfx_state_desc.rast_state.msaa_enable = true;
+	gfx_state_desc.rast_state.aa_line_enable = true;
+	gfx_state_desc.prim_type = k3primType::TRIANGLE;
+	gfx_state_desc.num_render_targets = 1;
+	gfx_state_desc.msaa_samples = 1;
+	gfx_state_desc.rtv_format[0] = k3fmt::RGBA8_UNORM;
+	gfx_state_desc.dsv_format = k3fmt::D24_UNORM_S8_UINT;
 
-	// vertex group
-	k2inputelement inelm[1];
-	inelm[0].semantic_name = "POSITION";
-	inelm[0].semantic_index = 0;
-	inelm[0].format = K2FMT_RG32_FLOAT;
-	inelm[0].slot = 0;
-	inelm[0].byte_offset = 0;
+	gfx_state_desc.vertex_shader = screen_vs;
+	gfx_state_desc.pixel_shader = background_ps;
+	gfx_state_desc.blend_state = bs_mask;
+	gfx_state_desc.depth_state = ds_normal;
+	nes->st_background = nes->gfx->CreateGfxState(&gfx_state_desc);
 
-	k2inputformat* infmt = nes->gfx->k2CreateInputFormat(1, inelm);
+	gfx_state_desc.pixel_shader = exp_background_ps;
+	nes->st_exp_background = nes->gfx->CreateGfxState(&gfx_state_desc);
 
-	float vb_data[] = { 0.0f, 0.0f,
-						256.0f, 0.0f,
-						0.0f, 240.0f,
-						256.0f, 240.0f };
-	k2vertexbuffer* vb = nes->gfx->k2CreateVertexBuffer(8, 4, 0, vb_data);
-	nes->vg_fullscreen = nes->gfx->k2CreateVertexGroup(K2TRIANGLESTRIP, 1, infmt, NULL, &vb);
+	gfx_state_desc.pixel_shader = fill_ps;
+	gfx_state_desc.blend_state = bs_normal;
+	gfx_state_desc.depth_state = ds_none;
+	nes->st_fill = nes->gfx->CreateGfxState(&gfx_state_desc);
 
-	infmt = nes->gfx->k2CreateInputFormat(1, inelm);
-	vb_data[2] = 8.0f;
-	vb_data[5] = 8.0f;
-	vb_data[6] = 8.0f;
-	vb_data[7] = 8.0f;
-	vb = nes->gfx->k2CreateVertexBuffer(8, 4, 0, vb_data);
-	nes->vg_sprite = nes->gfx->k2CreateVertexGroup(K2TRIANGLESTRIP, 1, infmt, NULL, &vb);
+	gfx_state_desc.vertex_shader = sprite_vs;
+	gfx_state_desc.pixel_shader = sprite_ps;
+	gfx_state_desc.blend_state = bs_mask;
+	gfx_state_desc.depth_state = ds_sprite;
+	nes->st_sprite = nes->gfx->CreateGfxState(&gfx_state_desc);
 
-	nes->cb_nametable = nes->gfx->k2CreateConstantBuffer(4*1024, K2ACCESS_UPDATE, NULL);
-	nes->cb_pattern = nes->gfx->k2CreateConstantBuffer(512 * 16, K2ACCESS_UPDATE, NULL);
-	nes->cb_palette = nes->gfx->k2CreateConstantBuffer(256, K2ACCESS_UPDATE, NULL);
-	nes->cb_ppu = nes->gfx->k2CreateConstantBuffer(16, K2ACCESS_UPDATE, NULL);
-	nes->cb_sprite = nes->gfx->k2CreateConstantBuffer(256, K2ACCESS_UPDATE, NULL);
-	nes->cb_exp_nametable = nes->gfx->k2CreateConstantBuffer(4 * 1024, K2ACCESS_UPDATE, NULL);
+	// Create buffers
+	uint32_t i;
+	for (i = 0; i < nessys_t::NUM_CPU_VERSIONS; i++) {
+		nes->cb_upload[i] = nes->gfx->CreateUploadBuffer();
+		nes->surf_upload_exp_pattern[i] = nes->gfx->CreateUploadImage();
+		nes->surf_upload_exp_pattern[i]->SetDimensions(256, 64, 1, k3fmt::RGBA32_UINT);
+	}
 
-	k2constantelement celem[] = { 
-		{"ppu", nes->cb_ppu},
-		{"palette", nes->cb_palette},
-		{"pattern", nes->cb_pattern},
-		{"nametable", nes->cb_nametable} };
-	nes->cg_fill = nes->gfx->k2CreateConstantGroup(nes->sg_fill, 2, celem);
-	nes->cg_background = nes->gfx->k2CreateConstantGroup(nes->sg_background, 4, celem);
+	float* vb_data = static_cast<float*>(nes->cb_upload[0]->MapForWrite(8 * sizeof(float)));
+	vb_data[0] = 0.0f; vb_data[1] = 0.0f;
+	vb_data[2] = 256.0f; vb_data[3] = 0.0f;
+	vb_data[4] = 0.0f; vb_data[5] = 240.0f;
+	vb_data[6] = 256.0f; vb_data[7] = 240.0f;
+	nes->cb_upload[0]->Unmap();
 
-	celem[3].slot_name = "sprite";
-	celem[3].constant_buffer = nes->cb_sprite;
-	nes->cg_sprite = nes->gfx->k2CreateConstantGroup(nes->sg_sprite, 4, celem);
+	vb_data = static_cast<float*>(nes->cb_upload[1]->MapForWrite(8 * sizeof(float)));
+	vb_data[0] = 0.0f; vb_data[1] = 0.0f;
+	vb_data[2] = 8.0f; vb_data[3] = 0.0f;
+	vb_data[4] = 0.0f; vb_data[5] = 8.0f;
+	vb_data[6] = 8.0f; vb_data[7] = 8.0f;
+	nes->cb_upload[1]->Unmap();
 
-	celem[2].slot_name = "exp_nametable";
-	celem[2].constant_buffer = nes->cb_exp_nametable;
-	celem[3].slot_name = "nametable";
-	celem[3].constant_buffer = nes->cb_nametable;
-	nes->cg_exp_background = nes->gfx->k2CreateConstantGroup(nes->sg_exp_background, 4, celem);
+	k3bufferDesc bdesc = { 0 };
+	bdesc.size = 8 * sizeof(float);
+	bdesc.stride = 2 * sizeof(float);
+	nes->vb_fullscreen = nes->gfx->CreateBuffer(&bdesc);
+	nes->vb_sprite = nes->gfx->CreateBuffer(&bdesc);
 
-	nes->st_exp_pattern = nes->gfx->k2CreateTexture(256, 64, K2FMT_RGBA32_UINT, K2ACCESS_UPDATE, NULL);
+	nes->cmd_buf->Reset();
+	nes->cmd_buf->TransitionResource(nes->vb_fullscreen->GetResource(), k3resourceState::COPY_DEST);
+	nes->cmd_buf->TransitionResource(nes->vb_sprite->GetResource(), k3resourceState::COPY_DEST);
+	nes->cmd_buf->TransitionResource(nes->surf_depth->GetResource(), k3resourceState::RENDER_TARGET);
+	nes->cmd_buf->UploadBuffer(nes->cb_upload[0], nes->vb_fullscreen->GetResource());
+	nes->cmd_buf->UploadBuffer(nes->cb_upload[1], nes->vb_sprite->GetResource());
+	nes->cmd_buf->Close();
+	nes->gfx->SubmitCmdBuf(nes->cmd_buf);
 
-	k2textureelement te[] = { {"exp_pattern", nes->st_exp_pattern->k2GetTexture(), NULL} };
-	nes->tg_exp_background = nes->gfx->k2CreateTextureGroup(nes->sg_exp_background, 1, 0, te, NULL);
+	bdesc.size = sizeof(nessys_cbuffer_exp_t);
+	bdesc.stride = 0;
+	bdesc.view_index = 0;
+	for (i = 0; i < nessys_t::NUM_GPU_VERSIONS; i++) {
+		nes->cb_main[i] = nes->gfx->CreateBuffer(&bdesc);
+		bdesc.view_index++;
+	}
 
-	nes->sb_main = nes->win->k2CreateSBuffer(NESSYS_SND_SAMPLES_PER_SECOND, NESSYS_SND_BITS_PER_SAMPLE, NESSYS_SND_SAMPLES);
-	void* sbuf_ptr = nes->sb_main->k2MapSBufForWrite(0, 2 * NESSYS_SND_SAMPLES);
+	rdesc.width = 256;
+	rdesc.height = 64;
+	rdesc.depth = 1;
+	rdesc.mip_levels = 1;
+	rdesc.num_samples = 1;
+	rdesc.format = k3fmt::RGBA32_UINT;
+	vdesc.view_index = bdesc.view_index;
+	for (i = 0; i < nessys_t::NUM_GPU_VERSIONS; i++) {
+		nes->surf_exp_pattern[i] = nes->gfx->CreateSurface(&rdesc, NULL, &vdesc, NULL);
+		vdesc.view_index++;
+	}
+
+	nes->sb_main = nes->win->CreateSoundBuffer(1, NESSYS_SND_SAMPLES_PER_SECOND, NESSYS_SND_BITS_PER_SAMPLE, NESSYS_SND_SAMPLES);
+	void* sbuf_ptr = nes->sb_main->MapForWrite(0, 2 * NESSYS_SND_SAMPLES, NULL, NULL);
 	memset(sbuf_ptr, 0, 2 * NESSYS_SND_SAMPLES);
-	nes->sb_main->k2UnmapSBuf(sbuf_ptr, 0, 2 * NESSYS_SND_SAMPLES);
+	nes->sb_main->Unmap(sbuf_ptr, 0, 2 * NESSYS_SND_SAMPLES);
 
 	// reset write pointer
 	nes->sbuf_offset = NESSYS_SND_START_POSITION;
-	sbuf_ptr = nes->sb_main->k2MapSBufForWrite(nes->sbuf_offset, NESSYS_SND_BYTES_PER_BUFFER);
-	nes->sb_main->k2UnmapSBuf(sbuf_ptr, nes->sbuf_offset, NESSYS_SND_BYTES_PER_BUFFER);
+	sbuf_ptr = nes->sb_main->MapForWrite(nes->sbuf_offset, NESSYS_SND_BYTES_PER_BUFFER, NULL, NULL);
+	nes->sb_main->Unmap(sbuf_ptr, nes->sbuf_offset, NESSYS_SND_BYTES_PER_BUFFER);
 
-	nes->timer = nes->win->k2CreateTimer();
+	nes->timer = nes->win->CreateTimer();
 }
 
 void nessys_power_cycle(nessys_t* nes)
@@ -172,7 +225,7 @@ void nessys_power_cycle(nessys_t* nes)
 	uint16_t bank, offset;
 	nes->reg.pc = *((uint16_t*)nessys_mem(nes, NESSYS_RST_VECTOR, &bank, &offset));
 	nes->apu.noise.shift_reg = 0x01;
-	nes->sb_main->k2StopSBuffer();
+	nes->sb_main->StopSBuffer();
 }
 
 void nessys_reset(nessys_t* nes)
@@ -188,7 +241,7 @@ void nessys_reset(nessys_t* nes)
 	uint16_t bank, offset;
 	nes->reg.pc = *((uint16_t*)nessys_mem(nes, NESSYS_RST_VECTOR, &bank, &offset));
 	nes->apu.noise.shift_reg = 0x01;
-	nes->sb_main->k2StopSBuffer();
+	nes->sb_main->StopSBuffer();
 }
 
 bool nessys_load_cart_filename(nessys_t* nes, const char* filename)
@@ -482,13 +535,13 @@ void nessys_gen_sound(nessys_t* nes)
 		//memcpy(sbuf_ptr, buffer, 2 * NESSYS_SND_SAMPLES / 3);
 		//nes->sb_main->k2UnmapSBuf(sbuf_ptr, wr_pos, 2*NESSYS_SND_SAMPLES / 3);
 
-		nes->sb_main->k2UnmapSBuf(p0, nes->sbuf_offset, wr_size);
+		nes->sb_main->Unmap(p0, nes->sbuf_offset, wr_size);
 
 		nes->sbuf_offset += wr_size;
 		nes->sbuf_offset = nes->sbuf_offset % NESSYS_SND_BYTES;
 
 		//nes->sb_main->k2UpdateSBuffer(buffer, 2*NESSYS_SND_SAMPLES/4);
-		nes->sb_main->k2PlaySBuffer();
+		nes->sb_main->PlaySBuffer();
 		playing = true;
 
 		//if ((nes->apu.frame_counter & 0xc0) == 0) {
@@ -529,7 +582,7 @@ void nessys_gen_scanline_sprite_map(nessys_ppu_t* ppu)
 	}
 }
 
-void K2CALLBACK nessys_display(void* ptr)
+void K3CALLBACK nessys_display(void* ptr)
 {
 	nessys_t* nes = (nessys_t*)ptr;
 	float clear_color[] = { NESSYS_PPU_PALETTE[0],
@@ -537,7 +590,7 @@ void K2CALLBACK nessys_display(void* ptr)
 							NESSYS_PPU_PALETTE[2],
 							1.0f };
 	float palette[4 * NESSYS_PPU_PAL_SIZE ];
-	uint8_t buffer[8 * 1024];
+	//uint8_t buffer[8 * 1024];
 	uint32_t cycles;
 	nesssys_set_scanline(nes, -21);
 	//printf("cycles remaining: %d\n", nes->cycles_remaining);
@@ -550,9 +603,15 @@ void K2CALLBACK nessys_display(void* ptr)
 	//printf("executed %d cycles\n", cycles);
 
 	// render image
-	nes->gfx->k2AttachRenderGroup(nes->rg_win);
-	nes->gfx->k2SetScissorRect(0, 0, 640, 480);
-	nes->gfx->k2Clear(K2CLEAR_COLOR0, clear_color, 1.0f, 0);
+	k3renderTargets rt = { NULL };
+	rt.render_targets[0] = nes->win->GetBackBuffer();
+	rt.depth_target = nes->surf_depth;
+	nes->cmd_buf->Reset();
+	nes->cmd_buf->TransitionResource(rt.render_targets[0]->GetResource(), k3resourceState::RENDER_TARGET);
+	nes->cmd_buf->SetRenderTargets(&rt);
+	nes->cmd_buf->SetViewToSurface(rt.render_targets[0]->GetResource());
+	nes->cmd_buf->ClearRenderTarget(rt.render_targets[0], clear_color, NULL);
+	nes->cmd_buf->SetDrawPrim(k3drawPrimType::TRIANGLESTRIP);
 
 	nes->ppu.status &= ~0xE0;
 	nes->ppu.reg[2] &= ~0xE0;
@@ -567,6 +626,8 @@ void K2CALLBACK nessys_display(void* ptr)
 	nes->ppu.scroll_y_changed = true;
 	nes->cycles_remaining += NESSYS_PPU_SCANLINES_RENDERED_CLKS + NESSYS_PPU_SCANLINES_POST_RENDER_CLKS; // 241 scanlines
 	nes->last_num_mid_scan_ntb_bank_changes = 0;
+	nessys_cbuffer_t* cb_data;
+	k3rect scissor;
 	int i, c, index;
 	do {
 		if (nes->ppu.scroll_y_changed) {
@@ -576,7 +637,16 @@ void K2CALLBACK nessys_display(void* ptr)
 			nes->ppu.scroll_y_changed = false;
 			//nes->ppu.scroll_y = 237;
 		}
-		nes->gfx->k2Clear(K2CLEAR_DEPTH | K2CLEAR_STENCIL, clear_color, 1.0f, 0);
+		if (nes->scanline) {
+			// need to re-open command buffer - should do this in a more robust way...
+			nes->cmd_buf->Reset();
+			nes->cmd_buf->SetRenderTargets(&rt);
+			nes->cmd_buf->SetViewToSurface(rt.render_targets[0]->GetResource());
+			nes->cmd_buf->TransitionResource(rt.render_targets[0]->GetResource(), k3resourceState::RENDER_TARGET);
+			nes->cmd_buf->SetDrawPrim(k3drawPrimType::TRIANGLESTRIP);
+		}
+		nes->cmd_buf->ClearDepthTarget(nes->surf_depth, k3depthSelect::DEPTH_STENCIL, 1.0f, 0, NULL);
+
 		// initialize palette if rendering background or sprites
 		for (i = 0; i < NESSYS_PPU_PAL_SIZE; i++) {
 			for (c = 0; c < 3; c++) {
@@ -585,25 +655,46 @@ void K2CALLBACK nessys_display(void* ptr)
 			}
 			palette[4 * i + 3] = ((i & 0x3) == 0) ? 0.0f : 1.0f;
 		}
-		nes->gfx->k2CBUpdate(nes->cb_ppu, &(nes->ppu.reg));
+		cb_data = static_cast<nessys_cbuffer_t*>(nes->cb_upload[nes->cb_main_cpu_version]->MapForWrite(sizeof(nessys_cbuffer_exp_t)));
+		memcpy(cb_data->ppu, nes->ppu.reg, 4 * sizeof(uint32_t));
+		memcpy(cb_data->sprite, nes->ppu.oam, 4 * 16 * sizeof(uint32_t));
+		index = NESSYS_CHR_ROM_WIN_MIN;
+		for (i = 0; i < 8; i++) {
+			memcpy(cb_data->pattern + (i << 8), nessys_ppu_mem(nes, index), 1024);
+			index += 1024;
+		}
+		memcpy(cb_data->palette, palette, 4 * 32 * sizeof(float));
+		index = NESSYS_CHR_NTB_WIN_MIN;
+		for (i = 0; i < 4; i++) {
+			memcpy(cb_data->nametable + (i << 8), nessys_ppu_mem(nes, index), 1024);
+			index += 1024;
+		}
+		nes->cb_upload[nes->cb_main_cpu_version]->Unmap();
+
+		nes->cmd_buf->SetGfxState(nes->st_fill);
+		nes->cmd_buf->TransitionResource(nes->cb_main[nes->cb_main_gpu_version]->GetResource(), k3resourceState::COPY_DEST);
+		nes->cmd_buf->UploadBuffer(nes->cb_upload[nes->cb_main_cpu_version], nes->cb_main[nes->cb_main_gpu_version]->GetResource());
+		nes->cmd_buf->TransitionResource(nes->cb_main[nes->cb_main_gpu_version]->GetResource(), k3resourceState::SHADER_BUFFER);
+		nes->cmd_buf->SetConstantBuffer(0, nes->cb_main[nes->cb_main_gpu_version]);
+		nes->cmd_buf->TransitionResource(nes->surf_exp_pattern[nes->surf_exp_gpu_version]->GetResource(), k3resourceState::SHADER_RESOURCE);
+		nes->cmd_buf->SetShaderView(1, nes->surf_exp_pattern[nes->surf_exp_gpu_version]);
+		nes->cb_main_cpu_version++;
+		nes->cb_main_gpu_version++;
+		if (nes->cb_main_cpu_version >= nessys_t::NUM_CPU_VERSIONS) nes->cb_main_cpu_version = 0;
+		if (nes->cb_main_gpu_version >= nessys_t::NUM_GPU_VERSIONS) nes->cb_main_gpu_version = 0;
 
 		//if (nes->scanline) 
 		//	printf("scanline %d ppureg[0]: 0x%x scroll: %d %d %d ppu addr 0x%x\n",
 		//		nes->scanline, nes->ppu.reg[0], nes->ppu.scroll[0], nes->ppu.scroll[1], nes->ppu.scroll_y, nes->ppu.mem_addr);
 
-		nes->gfx->k2AttachRasterizerState(nes->rs_normal);
-		nes->gfx->k2AttachBlendState(nes->bs_normal);
-		nes->gfx->k2AttachDepthState(nes->ds_none);
+		scissor.x = 64;
+		scissor.y = 2 * nes->scanline;
+		scissor.width = 512;
+		scissor.height = 480 - 2 * nes->scanline;
+		nes->cmd_buf->SetScissor(&scissor);
 
-		nes->gfx->k2SetScissorRect(64, 2*nes->scanline, 576, 480);
-
-		// update palette
-		nes->gfx->k2CBUpdate(nes->cb_palette, palette);
-		nes->gfx->k2AttachShaderGroup(nes->sg_fill);
-		nes->gfx->k2AttachConstantGroup(nes->cg_fill);
-		nes->gfx->k2AttachVertexGroup(nes->vg_fullscreen, 4);
-
-		nes->gfx->k2Draw();
+		nes->cmd_buf->SetVertexBuffer(0, nes->vb_fullscreen);
+		nes->cmd_buf->Draw(4);
 
 		if (nes->ppu.reg[0x1] & 0x08) {
 			uint32_t mapper_setup = NESSYS_MAPPER_SETUP_DRAW_INCOMPLETE;
@@ -617,21 +708,7 @@ void K2CALLBACK nessys_display(void* ptr)
 				mapper_setup = nes->mapper_bg_setup(nes, phase);
 
 				if (!(mapper_setup & NESSYS_MAPPER_SETUP_CUSTOM)) {
-					nes->gfx->k2CBUpdate(nes->cb_ppu, &(nes->ppu.reg));
-					// enable background rendering
-					// update constants
-					// nametable update
-					index = NESSYS_CHR_NTB_WIN_MIN;
-					for (i = 0; i < 4; i++) {
-						memcpy(buffer + (i << 10), nessys_ppu_mem(nes, index), 1024);
-						index += 1024;
-					}
-					nes->gfx->k2CBUpdate(nes->cb_nametable, buffer);
-
-					nes->gfx->k2AttachBlendState(nes->bs_mask);
-					nes->gfx->k2AttachDepthState(nes->ds_normal);
-					nes->gfx->k2AttachShaderGroup(nes->sg_background);
-					nes->gfx->k2AttachConstantGroup(nes->cg_background);
+					nes->cmd_buf->SetGfxState(nes->st_background);
 
 					uint8_t m;
 					uint16_t scan_right;
@@ -639,28 +716,81 @@ void K2CALLBACK nessys_display(void* ptr)
 						scan_right = nes->mid_scan_ntb_bank_change_position[m];
 						scan_right |= (scan_right == 0) << 8;  // make 0 into 256
 						scan_right = 64 + 2 * scan_right;
-						memcpy(buffer + 0 * 1024, nes->mid_scan_ntb_banks[4 * m + 0], 1024);
-						memcpy(buffer + 1 * 1024, nes->mid_scan_ntb_banks[4 * m + 1], 1024);
-						memcpy(buffer + 2 * 1024, nes->mid_scan_ntb_banks[4 * m + 2], 1024);
-						memcpy(buffer + 3 * 1024, nes->mid_scan_ntb_banks[4 * m + 3], 1024);
-						nes->gfx->k2CBUpdate(nes->cb_pattern, buffer);
-						nes->gfx->k2SetScissorRect(nes->scissor_left_x, nes->scissor_top_y, scan_right - 1, nes->scissor_bottom_y);
-						nes->gfx->k2Draw();
+						cb_data = static_cast<nessys_cbuffer_t*>(nes->cb_upload[nes->cb_main_cpu_version]->MapForWrite(sizeof(nessys_cbuffer_exp_t)));
+						memcpy(cb_data->ppu, nes->ppu.reg, 4 * sizeof(uint32_t));
+						memcpy(cb_data->sprite, nes->ppu.oam, 4 * 16 * sizeof(uint32_t));
+						index = NESSYS_CHR_ROM_WIN_MIN;
+						for (i = 0; i < 8; i++) {
+							memcpy(cb_data->pattern + (i << 8), nes->mid_scan_ntb_banks[4 * m + (i & 0x3)], 1024);
+							index += 1024;
+						}
+						memcpy(cb_data->palette, palette, 4 * 32 * sizeof(float));
+						index = NESSYS_CHR_NTB_WIN_MIN;
+						for (i = 0; i < 4; i++) {
+							memcpy(cb_data->nametable + (i << 8), nessys_ppu_mem(nes, index), 1024);
+							index += 1024;
+						}
+						nes->cb_upload[nes->cb_main_cpu_version]->Unmap();
+						nes->cmd_buf->TransitionResource(nes->cb_main[nes->cb_main_gpu_version]->GetResource(), k3resourceState::COPY_DEST);
+						nes->cmd_buf->UploadBuffer(nes->cb_upload[nes->cb_main_cpu_version], nes->cb_main[nes->cb_main_gpu_version]->GetResource());
+						nes->cmd_buf->TransitionResource(nes->cb_main[nes->cb_main_gpu_version]->GetResource(), k3resourceState::SHADER_BUFFER);
+						nes->cmd_buf->SetConstantBuffer(0, nes->cb_main[nes->cb_main_gpu_version]);
+						nes->cb_main_cpu_version++;
+						nes->cb_main_gpu_version++;
+						if (nes->cb_main_cpu_version >= nessys_t::NUM_CPU_VERSIONS) nes->cb_main_cpu_version = 0;
+						if (nes->cb_main_gpu_version >= nessys_t::NUM_GPU_VERSIONS) nes->cb_main_gpu_version = 0;
+					//	memcpy(buffer + 0 * 1024, nes->mid_scan_ntb_banks[4 * m + 0], 1024);
+					//	memcpy(buffer + 1 * 1024, nes->mid_scan_ntb_banks[4 * m + 1], 1024);
+					//	memcpy(buffer + 2 * 1024, nes->mid_scan_ntb_banks[4 * m + 2], 1024);
+					//	memcpy(buffer + 3 * 1024, nes->mid_scan_ntb_banks[4 * m + 3], 1024);
+					//	nes->gfx->k2CBUpdate(nes->cb_pattern, buffer);
+						scissor.x = nes->scissor_left_x;
+						scissor.y = nes->scissor_top_y;
+						scissor.width = scan_right - nes->scissor_left_x;
+						scissor.height = nes->scissor_bottom_y - nes->scissor_top_y;
+						nes->cmd_buf->SetScissor(&scissor);
+						nes->cmd_buf->Draw(4);
 						nes->scissor_left_x = scan_right;
 					}
-					// pattern update
-					// copy pattern table at address 0x0, or 0x1000, if bit 4 of ppureg[0] is set, 1KB ata time
-					index = NESSYS_CHR_ROM_WIN_MIN + ((((uint32_t)nes->ppu.reg[0]) & 0x10) << 8);
-					for (i = 0; i < 4; i++) {
-						memcpy(buffer + (i << 10), nessys_ppu_mem(nes, index), 1024);
-						index += 1024;
-					}
-					nes->gfx->k2CBUpdate(nes->cb_pattern, buffer);
+					if (nes->last_num_mid_scan_ntb_bank_changes) {
+						// go back to original data
+						uint32_t upload_version = ((nes->last_num_mid_scan_ntb_bank_changes >= nes->cb_main_cpu_version) ? nessys_t::NUM_CPU_VERSIONS : 0);
+						upload_version += nes->cb_main_cpu_version - nes->last_num_mid_scan_ntb_bank_changes - 1;
 
-					nes->gfx->k2SetScissorRect(nes->scissor_left_x, nes->scissor_top_y, nes->scissor_right_x, nes->scissor_bottom_y);
+						//cb_data = static_cast<nessys_cbuffer_t*>(nes->cb_upload[nes->cb_main_cpu_version]->MapForWrite(sizeof(nessys_cbuffer_exp_t)));
+						//memcpy(cb_data->ppu, nes->ppu.reg, 4 * sizeof(uint32_t));
+						//memcpy(cb_data->sprite, nes->ppu.oam, 4 * 16 * sizeof(uint32_t));
+						//index = NESSYS_CHR_ROM_WIN_MIN;
+						//for (i = 0; i < 8; i++) {
+						//	memcpy(cb_data->pattern + (i << 8), nessys_ppu_mem(nes, index), 1024);
+						//	index += 1024;
+						//}
+						//memcpy(cb_data->palette, palette, 4 * 32 * sizeof(float));
+						//index = NESSYS_CHR_NTB_WIN_MIN;
+						//for (i = 0; i < 4; i++) {
+						//	memcpy(cb_data->nametable + (i << 8), nessys_ppu_mem(nes, index), 1024);
+						//	index += 1024;
+						//}
+						//nes->cb_upload[nes->cb_main_cpu_version]->Unmap();
+						nes->cmd_buf->TransitionResource(nes->cb_main[nes->cb_main_gpu_version]->GetResource(), k3resourceState::COPY_DEST);
+						nes->cmd_buf->UploadBuffer(nes->cb_upload[upload_version], nes->cb_main[nes->cb_main_gpu_version]->GetResource());
+						nes->cmd_buf->TransitionResource(nes->cb_main[nes->cb_main_gpu_version]->GetResource(), k3resourceState::SHADER_BUFFER);
+						nes->cmd_buf->SetConstantBuffer(0, nes->cb_main[nes->cb_main_gpu_version]);
+						//nes->cb_main_cpu_version++;
+						nes->cb_main_gpu_version++;
+						//if (nes->cb_main_cpu_version >= nessys_t::NUM_CPU_VERSIONS) nes->cb_main_cpu_version = 0;
+						if (nes->cb_main_gpu_version >= nessys_t::NUM_GPU_VERSIONS) nes->cb_main_gpu_version = 0;
+
+					}
+
+					scissor.x = nes->scissor_left_x;
+					scissor.y = nes->scissor_top_y;
+					scissor.width = nes->scissor_right_x - nes->scissor_left_x;
+					scissor.height = nes->scissor_bottom_y - nes->scissor_top_y;
+					nes->cmd_buf->SetScissor(&scissor);
 				}
 
-				nes->gfx->k2Draw();
+				nes->cmd_buf->Draw(4);
 				phase++;
 			}
 		}
@@ -678,27 +808,31 @@ void K2CALLBACK nessys_display(void* ptr)
 
 				if (!(mapper_setup & NESSYS_MAPPER_SETUP_CUSTOM)) {
 					// enable sprite rendering
-					nes->gfx->k2AttachBlendState(nes->bs_mask);
-					nes->gfx->k2AttachDepthStateWithRef(nes->ds_sprite, 8);
-					nes->gfx->k2AttachRasterizerState(nes->rs_normal);
-					nes->gfx->k2SetScissorRect(nes->scissor_left_x, nes->scissor_top_y, nes->scissor_right_x, nes->scissor_bottom_y);
+					nes->cmd_buf->SetGfxState(nes->st_sprite);
+					nes->cmd_buf->SetStencilRef(8);
+					scissor.x = nes->scissor_left_x;
+					scissor.y = nes->scissor_top_y;
+					scissor.width = nes->scissor_right_x - nes->scissor_left_x;
+					scissor.height = nes->scissor_bottom_y - nes->scissor_top_y;
+					nes->cmd_buf->SetScissor(&scissor);
+					nes->cmd_buf->SetVertexBuffer(0, nes->vb_sprite);
 
 					// update constants that are same for all sprites
-					index = NESSYS_CHR_ROM_WIN_MIN;
-					for (i = 0; i < 8; i++) {
-						memcpy(buffer + (i << 10), nessys_ppu_mem(nes, index), 1024);
-						index += 1024;
-					}
-					nes->gfx->k2CBUpdate(nes->cb_ppu, &(nes->ppu.reg));
-					nes->gfx->k2CBUpdate(nes->cb_pattern, buffer);
-					nes->gfx->k2CBUpdate(nes->cb_palette, palette + 2 * NESSYS_PPU_PAL_SIZE);
-					nes->gfx->k2CBUpdate(nes->cb_sprite, nes->ppu.oam);
-					nes->gfx->k2AttachConstantGroup(nes->cg_sprite);
-
-					nes->gfx->k2AttachInstancedVertexGroup(nes->vg_sprite, 4, 128);
-					nes->gfx->k2AttachShaderGroup(nes->sg_sprite);
+					//index = NESSYS_CHR_ROM_WIN_MIN;
+					//for (i = 0; i < 8; i++) {
+					//	memcpy(buffer + (i << 10), nessys_ppu_mem(nes, index), 1024);
+					//	index += 1024;
+					//}
+					//nes->gfx->k2CBUpdate(nes->cb_ppu, &(nes->ppu.reg));
+					//nes->gfx->k2CBUpdate(nes->cb_pattern, buffer);
+					//nes->gfx->k2CBUpdate(nes->cb_palette, palette + 2 * NESSYS_PPU_PAL_SIZE);
+					//nes->gfx->k2CBUpdate(nes->cb_sprite, nes->ppu.oam);
+					//nes->gfx->k2AttachConstantGroup(nes->cg_sprite);
+					//
+					//nes->gfx->k2AttachInstancedVertexGroup(nes->vg_sprite, 4, 128);
+					//nes->gfx->k2AttachShaderGroup(nes->sg_sprite);
 				}
-				nes->gfx->k2Draw();
+				nes->cmd_buf->Draw(4, 0, 128, 0);
 
 				phase++;
 				//for (i = 0; i < 64; i++) {
@@ -713,6 +847,9 @@ void K2CALLBACK nessys_display(void* ptr)
 				//}
 			}
 		}
+		nes->cmd_buf->TransitionResource(rt.render_targets[0]->GetResource(), k3resourceState::COMMON);
+		nes->cmd_buf->Close();
+		nes->gfx->SubmitCmdBuf(nes->cmd_buf);
 
 		// compute sprite0 hit
 		if ((nes->ppu.reg[0x1] & 0x18) && ((nes->ppu.reg[2] & 0x40)==0x0)) {
@@ -895,8 +1032,8 @@ void K2CALLBACK nessys_display(void* ptr)
 	} while (nes->cycles_remaining > 100);
 
 	nessys_gen_sound(nes);
-	nes->win->k2SwapBuffer();
-	//printf("end frame: %d\n", nes->timer->k2GetTime());
+	nes->win->SwapBuffer();
+	//printf("end frame: %d\n", nes->timer->GetTime());
 
 }
 
@@ -916,42 +1053,42 @@ uint8_t nessys_masked_joypad(uint8_t joypad)
 	return result;
 }
 
-void K2CALLBACK nessys_keyboard(void* ptr, k2key k, k2char c, k2keystate state)
+void K3CALLBACK nessys_keyboard(void* ptr, k3key k, char c, k3keyState state)
 {
 	nessys_t* nes = (nessys_t*)ptr;
 	uint8_t key_mask = 0x0;
 	switch (k) {
-	case K2KEY_ESCAPE:
-		if (state == K2KEYSTATE_PRESSED) k2win::k2ExitLoop();
+	case k3key::ESCAPE:
+		if (state == k3keyState::PRESSED) k3winObj::ExitLoop();
 		break;
-	case K2KEY_UP:
+	case k3key::UP:
 		key_mask = NESSYS_STD_CONTROLLER_BUTTON_UP_MASK;
 		break;
-	case K2KEY_DOWN:
+	case k3key::DOWN:
 		key_mask = NESSYS_STD_CONTROLLER_BUTTON_DOWN_MASK;
 		break;
-	case K2KEY_LEFT:
+	case k3key::LEFT:
 		key_mask = NESSYS_STD_CONTROLLER_BUTTON_LEFT_MASK;
 		break;
-	case K2KEY_RIGHT:
+	case k3key::RIGHT:
 		key_mask = NESSYS_STD_CONTROLLER_BUTTON_RIGHT_MASK;
 		break;
-	case 'A':
+	case k3key::A:
 		key_mask = NESSYS_STD_CONTROLLER_BUTTON_B_MASK;
 		break;
-	case 'S':
+	case k3key::S:
 		key_mask = NESSYS_STD_CONTROLLER_BUTTON_A_MASK;
 		break;
-	case 'Q':
+	case k3key::Q:
 		key_mask = NESSYS_STD_CONTROLLER_BUTTON_SELECT_MASK;
 		break;
-	case 'W':
+	case k3key::W:
 		key_mask = NESSYS_STD_CONTROLLER_BUTTON_START_MASK;
 		break;
 	}
 
 	if (key_mask) {
-		if (state == K2KEYSTATE_RELEASED) {
+		if (state == k3keyState::RELEASED) {
 			nes->apu.joypad[0] &= ~key_mask;
 		} else {
 			nes->apu.joypad[0] |= key_mask;
@@ -2473,6 +2610,27 @@ void nessys_unload_cart(nessys_t* nes)
 void nessys_cleanup(nessys_t* nes)
 {
 	// clean up all gfx resources
-	// TODO - k2 is not working with destroy objects
+	//uint32_t i;
+	//nes->timer = NULL;
+	//nes->sb_main = NULL;
+	//for (i = 0; i < nessys_t::NUM_GPU_VERSIONS; i++) {
+	//	nes->cb_main[i] = NULL;
+	//	nes->surf_exp_pattern[i] = NULL;
+	//}
+	//for (i = 0; i < nessys_t::NUM_CPU_VERSIONS; i++) {
+	//	nes->cb_upload[i] = NULL;
+	//	nes->surf_upload_exp_pattern[i] = NULL;
+	//}
+	//nes->vb_sprite = NULL;
+	//nes->vb_fullscreen = NULL;
+	//nes->st_background = NULL;
+	//nes->st_fill = NULL;
+	//nes->st_sprite = NULL;
+	//nes->st_exp_background = NULL;
+	//nes->surf_depth = NULL;
+	//nes->cmd_buf = NULL;
+	//nes->fence = NULL;
+	//nes->gfx = NULL;
+	//nes->win = NULL;
 }
 
