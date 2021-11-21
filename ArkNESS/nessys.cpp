@@ -109,7 +109,7 @@ void nessys_init(nessys_t* nes)
 	gfx_state_desc.shader_binding = shader_binding;
 	gfx_state_desc.sample_mask = ~0;
 	gfx_state_desc.rast_state.fill_mode = k3fill::SOLID;
-	gfx_state_desc.rast_state.cull_mode = k3cull::NONE;
+	gfx_state_desc.rast_state.cull_mode = k3cull::BACK;
 	gfx_state_desc.rast_state.front_counter_clockwise = false;
 	gfx_state_desc.rast_state.depth_clip_enable = false;
 	gfx_state_desc.rast_state.msaa_enable = true;
@@ -138,7 +138,10 @@ void nessys_init(nessys_t* nes)
 	gfx_state_desc.pixel_shader = sprite_ps;
 	gfx_state_desc.blend_state = bs_mask;
 	gfx_state_desc.depth_state = ds_sprite;
-	nes->st_sprite = nes->gfx->CreateGfxState(&gfx_state_desc);
+	nes->st_sprite_max = nes->gfx->CreateGfxState(&gfx_state_desc);
+
+	gfx_state_desc.rast_state.cull_mode = k3cull::NONE;
+	nes->st_sprite_8 = nes->gfx->CreateGfxState(&gfx_state_desc);
 
 	// Create buffers
 	uint32_t i;
@@ -582,6 +585,25 @@ void nessys_gen_scanline_sprite_map(nessys_ppu_t* ppu)
 	}
 }
 
+bool nessys_sprite_max_check(nessys_t* nes)
+{
+	// returns true if we can use unlimited sprites per scanline
+	uint8_t coord_scorebaord[256 * NESSYS_PPU_SCANLINES_RENDERED] = { 0 };
+	uint8_t i;
+	uint32_t index;
+	bool use_sprite_max = true;
+	for (i = 0; i < NESSYS_PPU_NUM_SPRITES && use_sprite_max; i++) {
+		if (nes->ppu.oam[NESSYS_PPU_SPRITE_SIZE * i + 0] < 240) {
+			index = nes->ppu.oam[NESSYS_PPU_SPRITE_SIZE * i + 0];
+			index <<= 8;
+			index |= nes->ppu.oam[NESSYS_PPU_SPRITE_SIZE * i + 3];
+			coord_scorebaord[index]++;
+			if (coord_scorebaord[index] >= 8) use_sprite_max = false;
+		}
+	}
+	return use_sprite_max;
+}
+
 void K3CALLBACK nessys_display(void* ptr)
 {
 	nessys_t* nes = (nessys_t*)ptr;
@@ -808,7 +830,8 @@ void K3CALLBACK nessys_display(void* ptr)
 
 				if (!(mapper_setup & NESSYS_MAPPER_SETUP_CUSTOM)) {
 					// enable sprite rendering
-					nes->cmd_buf->SetGfxState(nes->st_sprite);
+					bool use_sprite_max = nessys_sprite_max_check(nes);
+					nes->cmd_buf->SetGfxState( (use_sprite_max) ? nes->st_sprite_max : nes->st_sprite_8 );
 					nes->cmd_buf->SetStencilRef(8);
 					scissor.x = nes->scissor_left_x;
 					scissor.y = nes->scissor_top_y;

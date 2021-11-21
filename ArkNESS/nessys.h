@@ -402,7 +402,8 @@ struct nessys_t {
 	k3fence fence;
 	k3gfxState st_background;
 	k3gfxState st_fill;
-	k3gfxState st_sprite;
+	k3gfxState st_sprite_8;   // limits to 8 sprites per scanline
+	k3gfxState st_sprite_max; // unlimited number of sprites per scanline
 	k3gfxState st_exp_background;
 	k3buffer vb_fullscreen;
 	k3buffer vb_sprite;
