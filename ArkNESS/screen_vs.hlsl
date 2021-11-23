@@ -22,7 +22,7 @@ VS_OUTPUT main(float2 pos : POSITION)
 	uint max_y = 240 + (uscroll_y & 0x100);
 	scroll.x = scroll.x + ((ppu.x & 0x1) << 8);
 	float2 start = float2(-128.0, -120.0);
-	float2 win_scale = float2(160.0, -120.0);
+	float2 win_scale = float2(128.0, -120.0);
 	o.pos.xy = (pos + start) / win_scale;
 	o.pos.zw = float2(0.5, 1.0);
 	o.texcoord.xy = scroll + pos;

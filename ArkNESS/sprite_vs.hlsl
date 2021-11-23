@@ -33,7 +33,7 @@ VS_OUTPUT main( float2 pos : POSITION, uint instance : SV_InstanceID )
 		pos.x *= -32.0;
 	}
 	float2 start = float2(-128.0, -120.0) + sprite_start;
-	float2 win_scale = float2(160.0, -120.0);
+	float2 win_scale = float2(128.0, -120.0);
 	pos.y = (ppu.x & 0x20) ? 2 * pos.y : pos.y;
 	float maxy = (ppu.x & 0x20) ? 16.0f : 8.0f;
 	o.pos.xy = ((pos + start) / win_scale);

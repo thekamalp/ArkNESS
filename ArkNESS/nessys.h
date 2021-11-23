@@ -397,6 +397,7 @@ struct nessys_t {
 	static const uint32_t NUM_CPU_VERSIONS = 16;
 	k3win win;
 	k3gfx gfx;
+	k3surf surf_render;
 	k3surf surf_depth;
 	k3cmdBuf cmd_buf;
 	k3fence fence;
@@ -405,6 +406,7 @@ struct nessys_t {
 	k3gfxState st_sprite_8;   // limits to 8 sprites per scanline
 	k3gfxState st_sprite_max; // unlimited number of sprites per scanline
 	k3gfxState st_exp_background;
+	k3gfxState st_copy;
 	k3buffer vb_fullscreen;
 	k3buffer vb_sprite;
 	uint32_t cb_main_cpu_version;
