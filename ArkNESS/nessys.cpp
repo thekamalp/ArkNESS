@@ -13,7 +13,7 @@ void nessys_init(nessys_t* nes)
 	nes->apu.reg = nes->apu.reg_mem;
 	nes->apu.pulse[0].env.flags = NESSYS_APU_PULSE_FLAG_SWEEP_ONES_COMP;
 	nes->apu.noise.shift_reg = 0x01;
-	nes->win = k3winObj::CreateWindowedWithFormat("ArkNESS", 0, 0, 512, 480, k3fmt::RGBA8_UNORM, 2 * nessys_t::NUM_GPU_VERSIONS + 1, 0);
+	nes->win = k3winObj::CreateWindowedWithFormat("ArkNESS", 0, 0, 512, 480, k3fmt::RGBA8_UNORM, 2 * nessys_t::NUM_GPU_VERSIONS + 1 + 2 + 2, 0);
 	nes->win->SetVisible(true);
 	nes->win->SetCursorVisible(true);
 	nes->win->SetDataPtr(nes);
@@ -50,18 +50,13 @@ void nessys_init(nessys_t* nes)
 	bind_params[1].view_set_desc.space = 0;
 	k3shaderBinding shader_binding = nes->gfx->CreateShaderBinding(2, bind_params, 0, NULL);
 
-	bind_params[0].type = k3bindingType::VIEW_SET;
-	bind_params[0].view_set_desc.type = k3shaderBindType::SRV;
-	bind_params[0].view_set_desc.num_views = 1;
-	bind_params[0].view_set_desc.reg = 0;
-	bind_params[0].view_set_desc.space = 0;
 	k3samplerDesc samp_desc = { 0 };
 	samp_desc.filter = k3texFilter::MIN_MAG_MIP_POINT;
 	samp_desc.addr_u = k3texAddr::CLAMP;
 	samp_desc.addr_v = k3texAddr::CLAMP;
 	samp_desc.addr_w = k3texAddr::CLAMP;
 	samp_desc.sampler_index = 0;
-	k3shaderBinding copy_binding = nes->gfx->CreateShaderBinding(1, bind_params, 1, &samp_desc);
+	k3shaderBinding copy_binding = nes->gfx->CreateShaderBinding(2, bind_params, 1, &samp_desc);
 
 	// initialize render states
 	k3blendState bs_normal = { 0 };
@@ -177,19 +172,33 @@ void nessys_init(nessys_t* nes)
 		nes->surf_upload_exp_pattern[i]->SetDimensions(256, 64, 1, k3fmt::RGBA32_UINT);
 	}
 
-	float* vb_data = static_cast<float*>(nes->cb_upload[0]->MapForWrite(8 * sizeof(float)));
-	vb_data[0] = 0.0f; vb_data[1] = 0.0f;
-	vb_data[2] = 256.0f; vb_data[3] = 0.0f;
-	vb_data[4] = 0.0f; vb_data[5] = 240.0f;
-	vb_data[6] = 256.0f; vb_data[7] = 240.0f;
+	float* buf_data = static_cast<float*>(nes->cb_upload[0]->MapForWrite(8 * sizeof(float)));
+	buf_data[0] = 0.0f; buf_data[1] = 0.0f;
+	buf_data[2] = 256.0f; buf_data[3] = 0.0f;
+	buf_data[4] = 0.0f; buf_data[5] = 240.0f;
+	buf_data[6] = 256.0f; buf_data[7] = 240.0f;
 	nes->cb_upload[0]->Unmap();
 
-	vb_data = static_cast<float*>(nes->cb_upload[1]->MapForWrite(8 * sizeof(float)));
-	vb_data[0] = 0.0f; vb_data[1] = 0.0f;
-	vb_data[2] = 8.0f; vb_data[3] = 0.0f;
-	vb_data[4] = 0.0f; vb_data[5] = 8.0f;
-	vb_data[6] = 8.0f; vb_data[7] = 8.0f;
+	buf_data = static_cast<float*>(nes->cb_upload[1]->MapForWrite(8 * sizeof(float)));
+	buf_data[0] = 0.0f; buf_data[1] = 0.0f;
+	buf_data[2] = 8.0f; buf_data[3] = 0.0f;
+	buf_data[4] = 0.0f; buf_data[5] = 8.0f;
+	buf_data[6] = 8.0f; buf_data[7] = 8.0f;
 	nes->cb_upload[1]->Unmap();
+
+	buf_data = static_cast<float*>(nes->cb_upload[2]->MapForWrite(16 * sizeof(float)));
+	buf_data[ 0] = 1.0f; buf_data[ 1] = 0.0f; buf_data[ 2] = 0.0f; buf_data[ 3] = 0.0f;
+	buf_data[ 4] = 0.0f; buf_data[ 5] = 1.0f; buf_data[ 6] = 0.0f; buf_data[ 7] = 0.0f;
+	buf_data[ 8] = 0.0f; buf_data[ 9] = 0.0f; buf_data[10] = 1.0f; buf_data[11] = 0.0f;
+	buf_data[12] = 0.0f; buf_data[13] = 0.0f; buf_data[14] = 0.0f; buf_data[15] = 1.0f;
+	nes->cb_upload[2]->Unmap();
+
+	buf_data = static_cast<float*>(nes->cb_upload[3]->MapForWrite(16 * sizeof(float)));
+	buf_data[ 0] = 0.1f; buf_data[ 1] = 0.2f; buf_data[ 2] = 0.03f; buf_data[ 3] = 0.0f;
+	buf_data[ 4] = 0.1f; buf_data[ 5] = 0.2f; buf_data[ 6] = 0.03f; buf_data[ 7] = 0.0f;
+	buf_data[ 8] = 0.1f; buf_data[ 9] = 0.2f; buf_data[10] = 0.03f; buf_data[11] = 0.0f;
+	buf_data[12] = 0.0f; buf_data[13] = 0.0f; buf_data[14] = 0.00f; buf_data[15] = 1.0f;
+	nes->cb_upload[3]->Unmap();
 
 	k3bufferDesc bdesc = { 0 };
 	bdesc.size = 8 * sizeof(float);
@@ -197,18 +206,32 @@ void nessys_init(nessys_t* nes)
 	nes->vb_fullscreen = nes->gfx->CreateBuffer(&bdesc);
 	nes->vb_sprite = nes->gfx->CreateBuffer(&bdesc);
 
+	bdesc.size = 16 * sizeof(float);
+	bdesc.stride = 0;
+	bdesc.view_index = 1;
+
+	nes->cb_copy_normal = nes->gfx->CreateBuffer(&bdesc);
+	bdesc.view_index++;
+
+	nes->cb_copy_menu = nes->gfx->CreateBuffer(&bdesc);
+	bdesc.view_index++;
+
 	nes->cmd_buf->Reset();
 	nes->cmd_buf->TransitionResource(nes->vb_fullscreen->GetResource(), k3resourceState::COPY_DEST);
 	nes->cmd_buf->TransitionResource(nes->vb_sprite->GetResource(), k3resourceState::COPY_DEST);
+	nes->cmd_buf->TransitionResource(nes->cb_copy_normal->GetResource(), k3resourceState::COPY_DEST);
+	nes->cmd_buf->TransitionResource(nes->cb_copy_menu->GetResource(), k3resourceState::COPY_DEST);
 	nes->cmd_buf->TransitionResource(nes->surf_depth->GetResource(), k3resourceState::RENDER_TARGET);
 	nes->cmd_buf->UploadBuffer(nes->cb_upload[0], nes->vb_fullscreen->GetResource());
 	nes->cmd_buf->UploadBuffer(nes->cb_upload[1], nes->vb_sprite->GetResource());
+	nes->cmd_buf->UploadBuffer(nes->cb_upload[2], nes->cb_copy_normal->GetResource());
+	nes->cmd_buf->UploadBuffer(nes->cb_upload[3], nes->cb_copy_menu->GetResource());
+	nes->cmd_buf->TransitionResource(nes->cb_copy_normal->GetResource(), k3resourceState::SHADER_BUFFER);
+	nes->cmd_buf->TransitionResource(nes->cb_copy_menu->GetResource(), k3resourceState::SHADER_BUFFER);
 	nes->cmd_buf->Close();
 	nes->gfx->SubmitCmdBuf(nes->cmd_buf);
 
 	bdesc.size = sizeof(nessys_cbuffer_exp_t);
-	bdesc.stride = 0;
-	bdesc.view_index = 1;
 	for (i = 0; i < nessys_t::NUM_GPU_VERSIONS; i++) {
 		nes->cb_main[i] = nes->gfx->CreateBuffer(&bdesc);
 		bdesc.view_index++;
@@ -237,6 +260,23 @@ void nessys_init(nessys_t* nes)
 	nes->sb_main->Unmap(sbuf_ptr, nes->sbuf_offset, NESSYS_SND_BYTES_PER_BUFFER);
 
 	nes->timer = nes->win->CreateTimer();
+
+	k3fontDesc fdesc = { 0 };
+	fdesc.view_index = vdesc.view_index;
+	fdesc.name = "..\\assets\\LapsusPro-Bold.otf";
+	fdesc.point_size = 48.0f;
+	fdesc.style = k3fontStyle::NORMAL;
+	fdesc.weight = k3fontWeight::NORMAL;
+	fdesc.format = k3fmt::RGBA8_UNORM;
+	fdesc.cmd_buf = nes->cmd_buf;
+	fdesc.transparent = true;
+	nes->main_font = nes->gfx->CreateFont(&fdesc);
+
+	nesmenu_init(nes);
+
+	nes->win->SetKeyboardFunc(nessys_keyboard);
+	nes->win->SetDisplayFunc(nessys_display);
+	nes->win->SetIdleFunc(nessys_display);
 }
 
 void nessys_power_cycle(nessys_t* nes)
@@ -276,6 +316,7 @@ void nessys_reset(nessys_t* nes)
 bool nessys_load_cart_filename(nessys_t* nes, const char* filename)
 {
 	FILE* fh;
+	nessys_unload_cart(nes);
 	fopen_s(&fh, filename, "rb");
 	if (fh == NULL) {
 		return false;
@@ -614,7 +655,6 @@ void nessys_gen_scanline_sprite_map(nessys_ppu_t* ppu)
 bool nessys_sprite_max_check(nessys_t* nes)
 {
 	// returns true if we can use unlimited sprites per scanline
-	uint8_t coord_scorebaord[256 * NESSYS_PPU_SCANLINES_RENDERED] = { 0 };
 	uint8_t i;
 	uint32_t index;
 	bool use_sprite_max = true;
@@ -623,20 +663,84 @@ bool nessys_sprite_max_check(nessys_t* nes)
 			index = nes->ppu.oam[NESSYS_PPU_SPRITE_SIZE * i + 0];
 			index <<= 8;
 			index |= nes->ppu.oam[NESSYS_PPU_SPRITE_SIZE * i + 3];
-			coord_scorebaord[index]++;
-			if (coord_scorebaord[index] >= 8) use_sprite_max = false;
+			nes->coord_scoreboard[index]++;
+			if (nes->coord_scoreboard[index] >= 8) use_sprite_max = false;
+		}
+	}
+	// clear scoreboard for next time
+	for (i = 0; i < NESSYS_PPU_NUM_SPRITES; i++) {
+		if (nes->ppu.oam[NESSYS_PPU_SPRITE_SIZE * i + 0] < 240) {
+			index = nes->ppu.oam[NESSYS_PPU_SPRITE_SIZE * i + 0];
+			index <<= 8;
+			index |= nes->ppu.oam[NESSYS_PPU_SPRITE_SIZE * i + 3];
+			nes->coord_scoreboard[index] = 0;
 		}
 	}
 	return use_sprite_max;
 }
 
-void K3CALLBACK nessys_display(void* ptr)
+void nessys_scale_to_back_buffer(nessys_t* nes)
 {
-	nessys_t* nes = (nessys_t*)ptr;
+	k3renderTargets rt = { NULL };
+	k3rect scissor;
 	float clear_color[] = { NESSYS_PPU_PALETTE[0],
 							NESSYS_PPU_PALETTE[1],
 							NESSYS_PPU_PALETTE[2],
 							1.0f };
+	rt.render_targets[0] = nes->win->GetBackBuffer();
+	uint32_t win_width = nes->win->GetWidth();
+	uint32_t win_height = nes->win->GetHeight();
+	uint32_t win_width_pad = 0;
+	uint32_t win_height_pad = 0;
+	if (15 * win_width >= 16 * win_height) {
+		win_width_pad = win_width - ((win_height * 256) / 240);
+	} else {
+		win_height_pad = win_height - ((win_width * 240) / 256);
+	}
+	scissor.x = win_width_pad / 2;
+	scissor.y = win_height_pad / 2;
+	scissor.width = win_width - win_width_pad;
+	scissor.height = win_height - win_height_pad;
+	nes->cmd_buf->Reset();
+	nes->cmd_buf->ClearRenderTarget(nes->win->GetBackBuffer(), clear_color, NULL);
+	nes->cmd_buf->SetRenderTargets(&rt);
+	nes->cmd_buf->SetViewport(&scissor);
+	nes->cmd_buf->SetScissor(&scissor);
+	nes->cmd_buf->SetDrawPrim(k3drawPrimType::TRIANGLESTRIP);
+	nes->cmd_buf->TransitionResource(nes->surf_render->GetResource(), k3resourceState::SHADER_RESOURCE);
+	nes->cmd_buf->SetGfxState(nes->st_copy);
+	if (nes->menu.pane == nesmenu_pane_t::NONE) {
+		nes->cmd_buf->SetConstantBuffer(0, nes->cb_copy_normal);
+	} else {
+		nes->cmd_buf->SetConstantBuffer(0, nes->cb_copy_menu);
+	}
+	nes->cmd_buf->SetShaderView(1, nes->surf_render);
+	nes->cmd_buf->SetVertexBuffer(0, nes->vb_fullscreen);
+	nes->cmd_buf->Draw(4);
+	nes->cmd_buf->TransitionResource(rt.render_targets[0]->GetResource(), k3resourceState::COMMON);
+	nes->cmd_buf->Close();
+	nes->gfx->SubmitCmdBuf(nes->cmd_buf);
+
+}
+
+void K3CALLBACK nessys_display(void* ptr)
+{
+	nessys_t* nes = (nessys_t*)ptr;
+
+	if (nes->menu.pane == nesmenu_pane_t::NONE &&
+		(((nes->apu.joypad[0] & NESSYS_STD_CONTROLLER_BUTTON_START_MASK) && 
+			(nes->apu.joypad[0] & NESSYS_STD_CONTROLLER_BUTTON_SELECT_MASK)) ||
+		 (nes->prg_rom_base == NULL)) ) {
+		nes->menu.pane = nesmenu_pane_t::MAIN;
+		nesmenu_update_list(nes);
+		nes->apu.joypad[0] = 0;
+	}
+
+	if (nes->menu.pane != nesmenu_pane_t::NONE) {
+		nesmenu_display(nes);
+		return;
+	}
+
 	float palette[4 * NESSYS_PPU_PAL_SIZE ];
 	//uint8_t buffer[8 * 1024];
 	uint32_t cycles;
@@ -654,13 +758,6 @@ void K3CALLBACK nessys_display(void* ptr)
 	k3renderTargets rt = { NULL };
 	rt.render_targets[0] = nes->surf_render;
 	rt.depth_target = nes->surf_depth;
-	nes->cmd_buf->Reset();
-	nes->cmd_buf->TransitionResource(nes->win->GetBackBuffer()->GetResource(), k3resourceState::RENDER_TARGET);
-	nes->cmd_buf->TransitionResource(rt.render_targets[0]->GetResource(), k3resourceState::RENDER_TARGET);
-	nes->cmd_buf->ClearRenderTarget(nes->win->GetBackBuffer(), clear_color, NULL);
-	nes->cmd_buf->SetRenderTargets(&rt);
-	nes->cmd_buf->SetViewToSurface(rt.render_targets[0]->GetResource());
-	nes->cmd_buf->SetDrawPrim(k3drawPrimType::TRIANGLESTRIP);
 
 	nes->ppu.status &= ~0xE0;
 	nes->ppu.reg[2] &= ~0xE0;
@@ -686,13 +783,13 @@ void K3CALLBACK nessys_display(void* ptr)
 			nes->ppu.scroll_y_changed = false;
 			//nes->ppu.scroll_y = 237;
 		}
-		if (nes->scanline) {
-			// need to re-open command buffer - should do this in a more robust way...
-			nes->cmd_buf->Reset();
-			nes->cmd_buf->SetRenderTargets(&rt);
-			nes->cmd_buf->SetViewToSurface(rt.render_targets[0]->GetResource());
-			nes->cmd_buf->SetDrawPrim(k3drawPrimType::TRIANGLESTRIP);
-		}
+
+		nes->cmd_buf->Reset();
+		nes->cmd_buf->TransitionResource(nes->win->GetBackBuffer()->GetResource(), k3resourceState::RENDER_TARGET);
+		nes->cmd_buf->TransitionResource(rt.render_targets[0]->GetResource(), k3resourceState::RENDER_TARGET);
+		nes->cmd_buf->SetRenderTargets(&rt);
+		nes->cmd_buf->SetViewToSurface(rt.render_targets[0]->GetResource());
+		nes->cmd_buf->SetDrawPrim(k3drawPrimType::TRIANGLESTRIP);
 		nes->cmd_buf->ClearDepthTarget(nes->surf_depth, k3depthSelect::DEPTH_STENCIL, 1.0f, 0, NULL);
 
 		// initialize palette if rendering background or sprites
@@ -1079,34 +1176,7 @@ void K3CALLBACK nessys_display(void* ptr)
 		//printf("executed %d cycles; cycles remaining %d\n", cycles, nes->cycles_remaining);
 	} while (nes->cycles_remaining > 100);
 
-	rt.render_targets[0] = nes->win->GetBackBuffer();
-	rt.depth_target = NULL;
-	uint32_t win_width = nes->win->GetWidth();
-	uint32_t win_height = nes->win->GetHeight();
-	uint32_t win_width_pad = 0;
-	uint32_t win_height_pad = 0;
-	if (15 * win_width >= 16 * win_height) {
-		win_width_pad = win_width - ((win_height * 256) / 240);
-	} else {
-		win_height_pad = win_height - ((win_width * 240) / 256);
-	}
-	scissor.x = win_width_pad / 2;
-	scissor.y = win_height_pad / 2;
-	scissor.width = win_width - win_width_pad;
-	scissor.height = win_height - win_height_pad;
-	nes->cmd_buf->Reset();
-	nes->cmd_buf->SetRenderTargets(&rt);
-	nes->cmd_buf->SetViewport(&scissor);
-	nes->cmd_buf->SetScissor(&scissor);
-	nes->cmd_buf->SetDrawPrim(k3drawPrimType::TRIANGLESTRIP);
-	nes->cmd_buf->TransitionResource(nes->surf_render->GetResource(), k3resourceState::SHADER_RESOURCE);
-	nes->cmd_buf->SetGfxState(nes->st_copy);
-	nes->cmd_buf->SetShaderView(0, nes->surf_render);
-	nes->cmd_buf->SetVertexBuffer(0, nes->vb_fullscreen);
-	nes->cmd_buf->Draw(4);
-	nes->cmd_buf->TransitionResource(rt.render_targets[0]->GetResource(), k3resourceState::COMMON);
-	nes->cmd_buf->Close();
-	nes->gfx->SubmitCmdBuf(nes->cmd_buf);
+	nessys_scale_to_back_buffer(nes);
 
 	nessys_gen_sound(nes);
 	nes->win->SwapBuffer();
@@ -1136,7 +1206,10 @@ void K3CALLBACK nessys_keyboard(void* ptr, k3key k, char c, k3keyState state)
 	uint8_t key_mask = 0x0;
 	switch (k) {
 	case k3key::ESCAPE:
-		if (state == k3keyState::PRESSED) k3winObj::ExitLoop();
+		if (state == k3keyState::PRESSED) {
+			nes->menu.pane = (nes->menu.pane == nesmenu_pane_t::MAIN) ? nesmenu_pane_t::NONE : nesmenu_pane_t::MAIN;
+			nesmenu_update_list(nes);
+		}
 		break;
 	case k3key::UP:
 		key_mask = NESSYS_STD_CONTROLLER_BUTTON_UP_MASK;
@@ -1187,9 +1260,6 @@ bool nessys_load_cart(nessys_t* nes, FILE* fh)
 		success = nessys_init_mapper(nes);
 	}
 	if(success) {
-		nes->win->SetKeyboardFunc(nessys_keyboard);
-		nes->win->SetDisplayFunc(nessys_display);
-		nes->win->SetIdleFunc(nessys_display);
 		nessys_power_cycle(nes);
 	}
 
@@ -2641,9 +2711,6 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 void nessys_unload_cart(nessys_t* nes)
 {
 	nessys_cleanup_mapper(nes);
-	nes->win->SetDisplayFunc(NULL);
-	nes->win->SetDisplayFunc(NULL);
-	nes->win->SetIdleFunc(NULL);
 	if (nes->ppu.mem_4screen) {
 		free(nes->ppu.mem_4screen);
 		nes->ppu.mem_4screen = NULL;
@@ -2667,5 +2734,10 @@ void nessys_unload_cart(nessys_t* nes)
 }
 
 void nessys_cleanup(nessys_t* nes)
-{ }
+{
+	nes->win->SetDisplayFunc(NULL);
+	nes->win->SetDisplayFunc(NULL);
+	nes->win->SetIdleFunc(NULL);
+	nesmenu_cleanup(nes);
+}
 

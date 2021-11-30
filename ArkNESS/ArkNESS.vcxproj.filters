@@ -27,6 +27,9 @@
     <ClInclude Include="mapper.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="nesmenu.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="nessys.cpp">
@@ -39,6 +42,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="mapper.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="nesmenu.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

@@ -12,6 +12,8 @@
 #include <string.h>
 #include <k3.h>
 
+#include "nesmenu.h"
+
 // memory map constnts
 const uint32_t NESSYS_RAM_SIZE = 0x800;  // 2KB Ram
 const uint32_t NESSYS_RAM_MASK = NESSYS_RAM_SIZE - 1;
@@ -414,6 +416,8 @@ struct nessys_t {
 	uint32_t surf_exp_cpu_version;
 	uint32_t surf_exp_gpu_version;
 	k3uploadBuffer cb_upload[NUM_CPU_VERSIONS];
+	k3buffer cb_copy_normal;
+	k3buffer cb_copy_menu;
 	k3buffer cb_main[NUM_GPU_VERSIONS];
 	k3uploadImage surf_upload_exp_pattern[NUM_CPU_VERSIONS];
 	k3surf surf_exp_pattern[NUM_GPU_VERSIONS];
@@ -421,6 +425,9 @@ struct nessys_t {
 	uint32_t sbuf_frame_start;
 	uint32_t sbuf_offset;
 	k3timer timer;
+	k3font main_font;
+	nesmenu_data menu;
+	uint8_t coord_scoreboard[256 * NESSYS_PPU_SCANLINES_RENDERED];
 };
 
 #include "c6502.h"
@@ -445,6 +452,9 @@ bool nessys_load_cart_filename(nessys_t* nes, const char* filename);
 bool nessys_load_cart(nessys_t* nes, FILE* fh);
 bool nessys_init_mapper(nessys_t* nes);
 void nessys_default_memmap(nessys_t* nes);
+void nessys_scale_to_back_buffer(nessys_t* nes);
+void K3CALLBACK nessys_keyboard(void* ptr, k3key k, char c, k3keyState state);
+void K3CALLBACK nessys_display(void* ptr);
 bool nessys_add_mid_scan_bank_change(nessys_t* nes);
 uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles);
 void nessys_cleanup_mapper(nessys_t* nes);
