@@ -702,6 +702,7 @@ void nessys_scale_to_back_buffer(nessys_t* nes)
 	scissor.width = win_width - win_width_pad;
 	scissor.height = win_height - win_height_pad;
 	nes->cmd_buf->Reset();
+	nes->cmd_buf->TransitionResource(nes->win->GetBackBuffer()->GetResource(), k3resourceState::RENDER_TARGET);
 	nes->cmd_buf->ClearRenderTarget(nes->win->GetBackBuffer(), clear_color, NULL);
 	nes->cmd_buf->SetRenderTargets(&rt);
 	nes->cmd_buf->SetViewport(&scissor);
@@ -1017,8 +1018,8 @@ void K3CALLBACK nessys_display(void* ptr)
 				pat_addr = (*nessys_ppu_mem(nes, NESSYS_CHR_NTB_WIN_MIN + ntb_addr) << 4) | ((nes->ppu.reg[0] & 0x10) << 8);
 				bg_pattern[1] = *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr));
 				bg_pattern[1] |= *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr + 8));
+				if (((global_y & 0xFF) >= 240) && ((global_y & 0xFF) + 8) >= 256) global_y -= 256;
 				if (((global_y & 0xFF) < 240) && ((global_y & 0xFF) + 8) >= 240) global_y += 16;
-				if (((global_y & 0xFF) >=240) && ((global_y & 0xFF) + 8) >= 256) global_y -= 256;
 				global_y += 8;
 				ntb_addr = ((global_x & 0xF8) >> 3) | ((global_y & 0xF8) << 2) | ((global_x & 0x100) << 2) | ((global_y & 0x100) << 3);
 				pat_addr = (*nessys_ppu_mem(nes, NESSYS_CHR_NTB_WIN_MIN + ntb_addr) << 4) | ((nes->ppu.reg[0] & 0x10) << 8);
@@ -1029,8 +1030,8 @@ void K3CALLBACK nessys_display(void* ptr)
 				pat_addr = (*nessys_ppu_mem(nes, NESSYS_CHR_NTB_WIN_MIN + ntb_addr) << 4) | ((nes->ppu.reg[0] & 0x10) << 8);
 				bg_pattern[2] = *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr));
 				bg_pattern[2] |= *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr + 8));
+				if (((global_y & 0xFF) >= 240) && ((global_y & 0xFF) + 8) >= 256) global_y -= 256;
 				if (((global_y & 0xFF) < 240) && ((global_y & 0xFF) + 8) >= 240) global_y += 16;
-				if (((global_y & 0xFF) >=240) && ((global_y & 0xFF) + 8) >= 256) global_y -= 256;
 				global_y += 8;
 				ntb_addr = ((global_x & 0xF8) >> 3) | ((global_y & 0xF8) << 2) | ((global_x & 0x100) << 2) | ((global_y & 0x100) << 3);
 				pat_addr = (*nessys_ppu_mem(nes, NESSYS_CHR_NTB_WIN_MIN + ntb_addr) << 4) | ((nes->ppu.reg[0] & 0x10) << 8);
