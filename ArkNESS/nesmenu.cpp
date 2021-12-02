@@ -100,7 +100,11 @@ void nesmenu_display(nessys_t* nes)
 	uint32_t cur_menu_items = nes->menu.cur_list_size;
 	nes->sb_main->StopSBuffer();
 	std::string pane_title = "ArkNESS";
-	if (nes->apu.joypad[0] & (NESSYS_STD_CONTROLLER_BUTTON_DOWN_MASK | NESSYS_STD_CONTROLLER_BUTTON_SELECT_MASK)) {
+
+	uint32_t displayable_menu_items = (nes->win->GetHeight() / font_height) - 1;
+	if (displayable_menu_items > 31) displayable_menu_items = 31;
+
+	if (nes->apu.joypad[0] & NESSYS_STD_CONTROLLER_BUTTON_DOWN_MASK) {
 		nes->apu.joypad[0] = 0;
 		nes->menu.select++;
 		if (nes->menu.select >= cur_menu_items) nes->menu.select = 0;
@@ -109,6 +113,20 @@ void nesmenu_display(nessys_t* nes)
 		nes->apu.joypad[0] = 0;
 		if (nes->menu.select == 0) nes->menu.select = cur_menu_items - 1;
 		else nes->menu.select--;
+	}
+	if (nes->apu.joypad[0] & NESSYS_STD_CONTROLLER_BUTTON_RIGHT_MASK) {
+		nes->apu.joypad[0] = 0;
+		if (nes->menu.select == cur_menu_items-1) nes->menu.select = 0;
+		else {
+			nes->menu.select += displayable_menu_items;
+			if (nes->menu.select >= cur_menu_items) nes->menu.select = cur_menu_items - 1;
+		}
+	}
+	if (nes->apu.joypad[0] & NESSYS_STD_CONTROLLER_BUTTON_LEFT_MASK) {
+		nes->apu.joypad[0] = 0;
+		if (nes->menu.select == 0) nes->menu.select = cur_menu_items - 1;
+		else if (nes->menu.select < displayable_menu_items) nes->menu.select = 0;
+		else nes->menu.select -= displayable_menu_items;
 	}
 	if (nes->apu.joypad[0] & (NESSYS_STD_CONTROLLER_BUTTON_A_MASK | NESSYS_STD_CONTROLLER_BUTTON_START_MASK)) {
 		nes->apu.joypad[0] = 0;
@@ -179,9 +197,6 @@ void nesmenu_display(nessys_t* nes)
 		pane_title = "Open";
 		break;
 	}
-
-	uint32_t displayable_menu_items = (nes->win->GetHeight() / font_height) - 1;
-	if (displayable_menu_items > 31) displayable_menu_items = 31;
 
 	if (nes->menu.select < nes->menu.list_start) nes->menu.list_start = nes->menu.select;
 	if (nes->menu.select >= nes->menu.list_start + displayable_menu_items) nes->menu.list_start = nes->menu.select - displayable_menu_items + 1;
