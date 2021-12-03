@@ -1,6 +1,5 @@
 // screen_vs.hlsl
 // takes NES pixel coordinates and transforms to normalized viewport coordinates
-// assumes a 640x480 resolution screen, and each NES pixel is written out as a 2x2
 // renders 256x240 screen
 
 cbuffer cbuf : register(b0) {

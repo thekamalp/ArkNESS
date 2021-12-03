@@ -43,6 +43,7 @@ struct nesmenu_data {
 	nesmenu_list_item* cur_list;
 	uint32_t cur_list_size;
 	uint32_t cur_list_alloc_size;
+	std::string message_box;
 };
 
 const uint32_t nesmenu_main_items = 3;

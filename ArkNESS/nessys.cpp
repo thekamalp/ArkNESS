@@ -69,6 +69,15 @@ void nessys_init(nessys_t* nes)
 	k3blendState bs_mask = bs_normal;
 	bs_mask.alpha_to_mask = true;
 
+	k3blendState bs_blend = bs_normal;
+	bs_blend.blend_op[0].blend_enable = true;
+	bs_blend.blend_op[0].src_blend = k3blend::SRC_ALPHA;
+	bs_blend.blend_op[0].dst_blend = k3blend::INV_SRC_ALPHA;
+	bs_blend.blend_op[0].blend_op = k3blendOp::ADD;
+	bs_blend.blend_op[0].alpha_src_blend = k3blend::SRC_ALPHA;
+	bs_blend.blend_op[0].alpha_dst_blend = k3blend::INV_SRC_ALPHA;
+	bs_blend.blend_op[0].alpha_blend_op = k3blendOp::ADD;
+
 	k3depthState ds_none = { 0 };
 	ds_none.depth_enable = false;
 	ds_none.depth_write_enable = false;
@@ -146,6 +155,9 @@ void nessys_init(nessys_t* nes)
 	gfx_state_desc.blend_state = bs_normal;
 	gfx_state_desc.depth_state = ds_none;
 	nes->st_fill = nes->gfx->CreateGfxState(&gfx_state_desc);
+
+	gfx_state_desc.blend_state = bs_blend;
+	nes->st_blend_fill = nes->gfx->CreateGfxState(&gfx_state_desc);
 
 	gfx_state_desc.vertex_shader = sprite_vs;
 	gfx_state_desc.pixel_shader = sprite_ps;
@@ -1208,8 +1220,12 @@ void K3CALLBACK nessys_keyboard(void* ptr, k3key k, char c, k3keyState state)
 	switch (k) {
 	case k3key::ESCAPE:
 		if (state == k3keyState::PRESSED) {
-			nes->menu.pane = (nes->menu.pane == nesmenu_pane_t::MAIN) ? nesmenu_pane_t::NONE : nesmenu_pane_t::MAIN;
-			nesmenu_update_list(nes);
+			if (nes->menu.message_box != "") {
+				nes->menu.message_box = "";
+			} else {
+				nes->menu.pane = (nes->menu.pane == nesmenu_pane_t::MAIN) ? nesmenu_pane_t::NONE : nesmenu_pane_t::MAIN;
+				nesmenu_update_list(nes);
+			}
 		}
 		break;
 	case k3key::UP:
@@ -1262,6 +1278,8 @@ bool nessys_load_cart(nessys_t* nes, FILE* fh)
 	}
 	if(success) {
 		nessys_power_cycle(nes);
+	} else {
+		nessys_unload_cart(nes);
 	}
 
 	return success;
@@ -2732,6 +2750,8 @@ void nessys_unload_cart(nessys_t* nes)
 		free(nes->ppu.chr_ram_base);
 		nes->ppu.chr_ram_base = NULL;
 	}
+	nes->ppu.chr_rom_size = 0;
+	nes->ppu.chr_ram_size = 0;
 }
 
 void nessys_cleanup(nessys_t* nes)
