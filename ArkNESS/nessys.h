@@ -350,6 +350,14 @@ struct nessys_cbuffer_exp_t {
 	uint32_t exp_nametable[4 * 4 * 64];
 };
 
+struct nessys_cbuffer_m9_t {
+	uint32_t alt_pattern[4 * 512];
+	uint32_t nametable_msb[ 4* 32];
+	uint32_t sprite_msb[8 * 240];
+};
+
+const uint32_t NESSYS_MAX_CBUFFER_SIZE = sizeof(nessys_cbuffer_t) + sizeof(nessys_cbuffer_m9_t);
+
 struct nessys_t {
 	uint32_t mapper_id;
 	uint32_t (*mapper_bg_setup)(nessys_t* nes, uint32_t phase);
@@ -408,7 +416,9 @@ struct nessys_t {
 	k3gfxState st_blend_fill;
 	k3gfxState st_sprite_8;   // limits to 8 sprites per scanline
 	k3gfxState st_sprite_max; // unlimited number of sprites per scanline
+	k3gfxState st_m9_sprite;
 	k3gfxState st_exp_background;
+	k3gfxState st_m9_background;
 	k3gfxState st_copy;
 	k3buffer vb_fullscreen;
 	k3buffer vb_sprite;

@@ -110,8 +110,10 @@ void nessys_init(nessys_t* nes)
 	k3shader copy_vs = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\copy_vs.cso");
 	k3shader fill_ps = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\fill_ps.cso");
 	k3shader sprite_ps = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\sprite_ps.cso");
+	k3shader m9_sprite_ps = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\m9_sprite_ps.cso");
 	k3shader background_ps = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\background_ps.cso");
 	k3shader exp_background_ps = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\exp_background_ps.cso");
+	k3shader m9_background_ps = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\m9_background_ps.cso");
 	k3shader copy_ps = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\copy_ps.cso");
 
 	// setup input format
@@ -151,6 +153,9 @@ void nessys_init(nessys_t* nes)
 	gfx_state_desc.pixel_shader = exp_background_ps;
 	nes->st_exp_background = nes->gfx->CreateGfxState(&gfx_state_desc);
 
+	gfx_state_desc.pixel_shader = m9_background_ps;
+	nes->st_m9_background = nes->gfx->CreateGfxState(&gfx_state_desc);
+
 	gfx_state_desc.pixel_shader = fill_ps;
 	gfx_state_desc.blend_state = bs_normal;
 	gfx_state_desc.depth_state = ds_none;
@@ -167,6 +172,9 @@ void nessys_init(nessys_t* nes)
 
 	gfx_state_desc.rast_state.cull_mode = k3cull::NONE;
 	nes->st_sprite_8 = nes->gfx->CreateGfxState(&gfx_state_desc);
+
+	gfx_state_desc.pixel_shader = m9_sprite_ps;
+	nes->st_m9_sprite = nes->gfx->CreateGfxState(&gfx_state_desc);
 
 	gfx_state_desc.shader_binding = copy_binding;
 	gfx_state_desc.vertex_shader = copy_vs;
@@ -243,7 +251,7 @@ void nessys_init(nessys_t* nes)
 	nes->cmd_buf->Close();
 	nes->gfx->SubmitCmdBuf(nes->cmd_buf);
 
-	bdesc.size = sizeof(nessys_cbuffer_exp_t);
+	bdesc.size = NESSYS_MAX_CBUFFER_SIZE;
 	for (i = 0; i < nessys_t::NUM_GPU_VERSIONS; i++) {
 		nes->cb_main[i] = nes->gfx->CreateBuffer(&bdesc);
 		bdesc.view_index++;

@@ -6,6 +6,9 @@
 
 #include "mapper.h"
 
+// ------------------------------------------------------------
+// default functions
+// used by mappers with specific specializations
 uint32_t mapper_null_setup(nessys_t* nes, uint32_t phase)
 {
 	return NESSYS_MAPPER_SETUP_DEFAULT;
@@ -37,6 +40,7 @@ bool mapper_update_null(nessys_t* nes)
 	return false;
 }
 
+// ------------------------------------------------------------
 // mapper 1 functions
 void mapper1_update_name_tbl_map(nessys_t* nes)
 {
@@ -260,6 +264,7 @@ bool mapper1_write(nessys_t* nes, uint16_t addr, uint8_t data)
 	return (data_changed) ? true : false;
 }
 
+// ------------------------------------------------------------
 // mapper 2 functions
 bool mapper2_write(nessys_t* nes, uint16_t addr, uint8_t data)
 {
@@ -282,6 +287,7 @@ bool mapper2_write(nessys_t* nes, uint16_t addr, uint8_t data)
 	return (data_changed) ? true : false;
 }
 
+// ------------------------------------------------------------
 // mapper 4 functions
 void mapper4_update_memmap(nessys_t* nes)
 {
@@ -416,6 +422,7 @@ bool mapper4_update(nessys_t* nes)
 	return false;
 }
 
+// ------------------------------------------------------------
 // mapper5 functions
 void mapper5_update_exp_chr_rom(nessys_t* nes)
 {
@@ -1044,6 +1051,7 @@ bool mapper5_update(nessys_t* nes)
 	return false;
 }
 
+// ------------------------------------------------------------
 // mapper7 functions
 void mapper7_update_memmap(nessys_t* nes)
 {
@@ -1076,6 +1084,207 @@ bool mapper7_write(nessys_t* nes, uint16_t addr, uint8_t data)
 	return (data_changed) ? true : false;
 }
 
+// ------------------------------------------------------------
+// mapper9 functions
+void mapper9_update_chr_map(nessys_t* nes, uint32_t latch0, uint32_t latch1)
+{
+	mapper9_data* m9_data = (mapper9_data*)nes->mapper_data;
+	uint8_t* base = (nes->ppu.chr_rom_base) ? nes->ppu.chr_rom_base : nes->ppu.chr_ram_base;
+	uint8_t b;
+	for (b = 0; b < 4; b++) {
+		nes->ppu.chr_rom_bank[b]     = base + (m9_data->chr_bank[0 | latch0] << MAPPER9_CHR_BANK_SIZE_LOG2) + (b << NESSYS_CHR_BANK_SIZE_LOG2);
+		nes->ppu.chr_rom_bank[b + 4] = base + (m9_data->chr_bank[2 | latch1] << MAPPER9_CHR_BANK_SIZE_LOG2) + (b << NESSYS_CHR_BANK_SIZE_LOG2);
+	}
+}
+
+void mapper9_update_prg_map(nessys_t* nes)
+{
+	mapper9_data* m9_data = (mapper9_data*)nes->mapper_data;
+	uint8_t* base = nes->prg_rom_base;
+	uint32_t offset = (m9_data->prg_bank & MAPPER9_PRG_BANK_BITS) << MAPPER9_PRG_BANK_SIZE_LOG2;
+	nes->prg_rom_bank[4] = base + offset;
+}
+
+void mapper9_update_nametable(nessys_t* nes)
+{
+	mapper9_data* m9_data = (mapper9_data*)nes->mapper_data;
+	nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 0] = nes->ppu.mem;
+	nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 3] = nes->ppu.mem + 0x400;
+	if (m9_data->mirror == MAPPER9_MIRROR_MODE_VERTICAL) {
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 1] = nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 3];
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 2] = nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 0];
+	} else {
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 1] = nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 0];
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 2] = nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 3];
+	}
+	uint8_t b;
+	for (b = NESSYS_CHR_NTB_START_BANK + 4; b <= NESSYS_CHR_NTB_END_BANK; b++) {
+		nes->ppu.chr_rom_bank[b] = nes->ppu.chr_rom_bank[b - 4];
+	}
+}
+
+bool mapper9_write(nessys_t* nes, uint16_t addr, uint8_t data)
+{
+	uint8_t data_change = 0;
+	uint16_t max_prg_rom_bank_offset = (nes->prg_rom_size >> MAPPER9_PRG_BANK_SIZE_LOG2) + ((nes->prg_rom_size & MAPPER9_PRG_BANK_MASK) ? 1 : 0);
+	uint16_t max_chr_rom_bank_offset = (nes->ppu.chr_rom_size >> MAPPER9_CHR_BANK_SIZE_LOG2) + ((nes->ppu.chr_rom_size & MAPPER9_CHR_BANK_MASK) ? 1 : 0);
+	uint16_t max_chr_ram_bank_offset = (nes->ppu.chr_ram_size >> MAPPER9_CHR_BANK_SIZE_LOG2) + ((nes->ppu.chr_ram_size & MAPPER9_CHR_BANK_MASK) ? 1 : 0);
+	if (max_chr_rom_bank_offset == 0) max_chr_rom_bank_offset = max_chr_ram_bank_offset;
+	uint8_t chr_bank_num = ((addr & MAPPER9_ADDR_MASK) - MAPPER9_ADDR_CHR_ROM_BANK0) >> 12;
+	mapper9_data* m9_data = (mapper9_data*)nes->mapper_data;
+	switch (addr & MAPPER9_ADDR_MASK) {
+	case MAPPER9_ADDR_PRG_ROM_BANK:
+		m9_data->prg_bank = (data & MAPPER9_PRG_BANK_BITS) % max_prg_rom_bank_offset;
+		mapper9_update_prg_map(nes);
+		break;
+	case MAPPER9_ADDR_CHR_ROM_BANK0:
+	case MAPPER9_ADDR_CHR_ROM_BANK1:
+	case MAPPER9_ADDR_CHR_ROM_BANK2:
+	case MAPPER9_ADDR_CHR_ROM_BANK3:
+		data_change = m9_data->chr_bank[chr_bank_num];
+		m9_data->chr_bank[chr_bank_num] = (data & MAPPER9_CHR_BANK_BITS) % max_chr_rom_bank_offset;
+		data_change ^= m9_data->chr_bank[chr_bank_num];
+		mapper9_update_chr_map(nes, 0, 0);
+		break;
+	case MAPPER9_ADDR_MIRROR:
+		data_change = m9_data->mirror;
+		m9_data->mirror = data & MAPPER9_MIRROR_BITS;
+		data_change ^= m9_data->mirror;
+		mapper9_update_nametable(nes);
+		break;
+	}
+	return (data_change) ? true : false;
+}
+
+uint32_t mapper9_bg_setup(nessys_t* nes, uint32_t phase)
+{
+	mapper9_data* m9_data = (mapper9_data*)nes->mapper_data;
+	mapper9_update_chr_map(nes, 1, 1);
+	nes->cb_main_gpu_version = (nes->cb_main_gpu_version == 0) ? nessys_t::NUM_GPU_VERSIONS - 1 : nes->cb_main_gpu_version - 1;
+	nessys_cbuffer_m9_t* cb_data = static_cast<nessys_cbuffer_m9_t*>(nes->cb_upload[nes->cb_main_cpu_version]->MapForWrite(sizeof(nessys_cbuffer_m9_t)));
+	uint32_t i, j, index = NESSYS_CHR_ROM_WIN_MIN;
+	for (i = 0; i < 8; i++) {
+		memcpy(cb_data->alt_pattern + (i << 8), nessys_ppu_mem(nes, index), 1024);
+		index += 1024;
+	}
+	uint32_t r, c;
+	uint32_t latch = 0;
+	uint8_t tile_num;
+	uint32_t background_latch = 0;
+	memset(cb_data->nametable_msb, 0, 4 * 128);
+	for (j = 0; j < 31; j++) {  // 31 rows
+		r = (nes->ppu.reg[0] & 0x2) << 4;
+		r |= nes->ppu.scroll_y >> 3;
+		r += j;
+		if ((r & 0x1f) >= 30) r += 2;
+		r &= 0x3f;
+		c = (nes->ppu.reg[0] & 0x1) << 5;
+		c |= nes->ppu.scroll[0] >> 3;
+		for (i = 0; i < 33; i++, c++) {  // 33 columns
+			c &= 0x3f;
+			index = ((r & 0x20) << 6) | ((c & 0x20) << 5) | ((r & 0x1f) << 5) | (c & 0x1f);
+			cb_data->nametable_msb[index >> 5] |= latch << (index & 0x1f);
+			index |= NESSYS_CHR_NTB_WIN_MIN;
+			tile_num = *nessys_ppu_mem(nes, index);
+			if (i == (nes->ppu.oam[3] >> 3) && j == (nes->ppu.oam[0] >> 3)) {
+				background_latch = latch;
+			}
+			if (tile_num == 0xFE) latch = 0x1;
+			else if (tile_num == 0xFD) latch = 0x0;
+		}
+	}
+
+	memset(cb_data->sprite_msb, 0, 32 * 240);
+	uint32_t num_pattern_start = 0;
+	uint32_t insert;
+	uint32_t sprite_pattern_start[NESSYS_PPU_NUM_SPRITES];
+	for (i = 0; i < NESSYS_PPU_NUM_SPRITES; i++) {
+		// check if the sprite is visiable, and uses tile index 0xFD or 0xFE
+		if (nes->ppu.oam[4 * i + 0] < 240 && (nes->ppu.oam[4 * i + 1] == 0xFD || nes->ppu.oam[4 * i + 1] == 0xFE)) {
+			sprite_pattern_start[num_pattern_start] = nes->ppu.oam[4 * i + 0];
+			sprite_pattern_start[num_pattern_start] <<= 8;
+			sprite_pattern_start[num_pattern_start] |= nes->ppu.oam[4 * i + 3];
+			sprite_pattern_start[num_pattern_start] |= (nes->ppu.oam[4 * i + 1] == 0xFE) ? 0x80000000 : 0x0;
+			num_pattern_start++;
+			for (j = num_pattern_start - 1; j > 0; j--) {
+				if ((sprite_pattern_start[j] & 0xFFFF) < (sprite_pattern_start[j - 1] & 0xFFFF)) {
+					insert = sprite_pattern_start[j - 1];
+					sprite_pattern_start[j - 1] = sprite_pattern_start[j];
+					sprite_pattern_start[j] = insert;
+				} else {
+					break;
+				}
+			}
+		}
+	}
+	uint32_t sprite0_index = nes->ppu.oam[0];
+	sprite0_index <<= 8;
+	sprite0_index |= nes->ppu.oam[3];
+	uint32_t sprite0_latch = 0;
+	for (i = 0; i < num_pattern_start; i++) {
+		uint32_t start_pix = sprite_pattern_start[i];
+		uint32_t end_pix = (i == num_pattern_start - 1) ? (239 << 8) | 255 : (sprite_pattern_start[i + 1] & 0xFFFF);
+		if (start_pix & 0x80000000) {
+			start_pix &= 0xFFFF;
+			if (sprite0_index >= start_pix && sprite0_index < end_pix) sprite0_latch = 1;
+			insert = static_cast<uint32_t>(~0x0) << (start_pix & 0x1f);
+			for (j = (start_pix >> 5); j < (end_pix >> 5); j++) {
+				cb_data->sprite_msb[j] |= insert;
+				insert = ~0x0;
+			}
+			insert &= ~(static_cast<uint32_t>(~0x0) << (end_pix & 0x1f));
+			cb_data->sprite_msb[j] |= insert;
+		}
+	}
+	nes->cb_upload[nes->cb_main_cpu_version]->Unmap();
+
+	nes->cmd_buf->SetGfxState(nes->st_m9_background);
+	nes->cmd_buf->TransitionResource(nes->cb_main[nes->cb_main_gpu_version]->GetResource(), k3resourceState::COPY_DEST);
+	nes->cmd_buf->UploadBuffer(nes->cb_upload[nes->cb_main_cpu_version], nes->cb_main[nes->cb_main_gpu_version]->GetResource(), sizeof(nessys_cbuffer_t));
+	nes->cmd_buf->TransitionResource(nes->cb_main[nes->cb_main_gpu_version]->GetResource(), k3resourceState::SHADER_BUFFER);
+	nes->cmd_buf->SetConstantBuffer(0, nes->cb_main[nes->cb_main_gpu_version]);
+	k3rect scissor;
+	scissor.x = nes->scissor_left_x;
+	scissor.y = nes->scissor_top_y;
+	scissor.width = nes->scissor_right_x - nes->scissor_left_x;
+	scissor.height = nes->scissor_bottom_y - nes->scissor_top_y;
+	nes->cmd_buf->SetScissor(&scissor);
+
+	nes->cb_main_cpu_version++;
+	nes->cb_main_gpu_version++;
+	if (nes->cb_main_cpu_version >= nessys_t::NUM_CPU_VERSIONS) nes->cb_main_cpu_version = 0;
+	if (nes->cb_main_gpu_version >= nessys_t::NUM_GPU_VERSIONS) nes->cb_main_gpu_version = 0;
+	mapper9_update_chr_map(nes, sprite0_latch, background_latch);
+
+	return NESSYS_MAPPER_SETUP_CUSTOM;
+}
+
+uint32_t mapper9_sprite_setup(nessys_t* nes, uint32_t phase)
+{
+	mapper9_data* m9_data = (mapper9_data*)nes->mapper_data;
+
+	nes->cmd_buf->SetGfxState(nes->st_m9_sprite);
+
+	k3rect scissor;
+	scissor.x = nes->scissor_left_x;
+	scissor.y = nes->scissor_top_y;
+	scissor.width = nes->scissor_right_x - nes->scissor_left_x;
+	scissor.height = nes->scissor_bottom_y - nes->scissor_top_y;
+	nes->cmd_buf->SetStencilRef(8);
+	nes->cmd_buf->SetScissor(&scissor);
+	nes->cmd_buf->SetVertexBuffer(0, nes->vb_sprite);
+
+	return NESSYS_MAPPER_SETUP_CUSTOM;
+
+}
+
+void mapper9_cpu_setup(nessys_t* nes)
+{
+	mapper9_update_chr_map(nes, 0, 0);
+}
+
+
+// ------------------------------------------------------------
 // mapper69 functions
 void mapper69_update_nametable(nessys_t* nes)
 {
@@ -1215,6 +1424,8 @@ void mapper69_reset(nessys_t* nes)
 	mapper69_update_nametable(nes);
 }
 
+// ------------------------------------------------------------
+// general mapper load and unload functions
 bool nessys_init_mapper(nessys_t* nes)
 {
 	bool success = true;
@@ -1266,6 +1477,14 @@ bool nessys_init_mapper(nessys_t* nes)
 		nes->mapper_data = malloc(sizeof(mapper7_data));
 		memset(nes->mapper_data, 0, sizeof(mapper7_data));
 		mapper7_update_memmap(nes);
+		break;
+	case 9:
+		nes->mapper_bg_setup = mapper9_bg_setup;
+		nes->mapper_sprite_setup = mapper9_sprite_setup;
+		nes->mapper_cpu_setup = mapper9_cpu_setup;
+		nes->mapper_write = mapper9_write;
+		nes->mapper_data = malloc(sizeof(mapper9_data));
+		memset(nes->mapper_data, 0, sizeof(mapper9_data));
 		break;
 	case 69:
 		nes->mapper_write = mapper69_write;

@@ -242,6 +242,36 @@ struct mapper7_data {
 };
 
 // ------------------------------------------------------------
+// mapper 9 struct/constants
+
+const uint16_t MAPPER9_ADDR_MASK = 0xF000;
+
+const uint16_t MAPPER9_ADDR_PRG_ROM_BANK  = 0xA000;
+const uint16_t MAPPER9_ADDR_CHR_ROM_BANK0 = 0xB000;
+const uint16_t MAPPER9_ADDR_CHR_ROM_BANK1 = 0xC000;
+const uint16_t MAPPER9_ADDR_CHR_ROM_BANK2 = 0xD000;
+const uint16_t MAPPER9_ADDR_CHR_ROM_BANK3 = 0xE000;
+const uint16_t MAPPER9_ADDR_MIRROR        = 0xF000;
+
+const uint8_t MAPPER9_PRG_BANK_SIZE_LOG2 = 13;  // 8KB granularity
+const uint32_t MAPPER9_PRG_BANK_MASK = (1 << MAPPER9_PRG_BANK_SIZE_LOG2) - 1;
+const uint8_t MAPPER9_CHR_BANK_SIZE_LOG2 = 12;  // 4KB granularity
+const uint32_t MAPPER9_CHR_BANK_MASK = (1 << MAPPER9_CHR_BANK_SIZE_LOG2) - 1;
+
+const uint8_t MAPPER9_MIRROR_MODE_VERTICAL = 0x0;
+const uint8_t MAPPER9_MIRROR_MODE_HORIZONTAL = 0x1;
+
+const uint8_t MAPPER9_PRG_BANK_BITS = 0x0F;
+const uint8_t MAPPER9_CHR_BANK_BITS = 0x1F;
+const uint8_t MAPPER9_MIRROR_BITS = 0x1;
+
+struct mapper9_data {
+	uint8_t prg_bank;
+	uint8_t chr_bank[4];
+	uint8_t mirror;
+};
+
+// ------------------------------------------------------------
 // mapper 69 struct/constants
 
 const uint16_t MAPPER69_ADDR_MASK = 0xE000;

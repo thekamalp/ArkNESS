@@ -73,5 +73,11 @@
     <FxCompile Include="copy_ps.hlsl">
       <Filter>Source Files</Filter>
     </FxCompile>
+    <FxCompile Include="m9_background_ps.hlsl">
+      <Filter>Source Files</Filter>
+    </FxCompile>
+    <FxCompile Include="m9_sprite_ps.hlsl">
+      <Filter>Source Files</Filter>
+    </FxCompile>
   </ItemGroup>
 </Project>
