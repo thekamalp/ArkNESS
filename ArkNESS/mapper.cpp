@@ -288,6 +288,28 @@ bool mapper2_write(nessys_t* nes, uint16_t addr, uint8_t data)
 }
 
 // ------------------------------------------------------------
+// mapper 3 functions
+bool mapper3_write(nessys_t* nes, uint16_t addr, uint8_t data)
+{
+	uint8_t* chr_mem_base = (nes->ppu.chr_rom_base != NULL) ? nes->ppu.chr_rom_base : nes->ppu.chr_ram_base;
+	uint32_t chr_mem_size = (nes->ppu.chr_rom_base != NULL) ? nes->ppu.chr_rom_size : nes->ppu.chr_ram_size;
+	uint16_t max_chr_rom_bank_offset = (chr_mem_size >> MAPPER3_CHR_BANK_SIZE_LOG2) + ((chr_mem_size * MAPPER3_CHR_BANK_MASK) ? 1 : 0);
+	mapper3_data* m3_data = (mapper3_data*)nes->mapper_data;
+	uint8_t data_changed = m3_data->chr_bank;
+	m3_data->chr_bank = data % max_chr_rom_bank_offset;
+	data_changed ^= m3_data->chr_bank;
+
+	uint8_t b;
+	uint32_t offset = m3_data->chr_bank << MAPPER3_CHR_BANK_SIZE_LOG2;
+	for (b = 0; b < 8; b++) {
+		nes->ppu.chr_rom_bank[b] = chr_mem_base + offset;
+		offset += NESSYS_CHR_BANK_SIZE;
+	}
+
+	return (data_changed) ? true : false;
+}
+
+// ------------------------------------------------------------
 // mapper 4 functions
 void mapper4_update_memmap(nessys_t* nes)
 {
@@ -1452,6 +1474,11 @@ bool nessys_init_mapper(nessys_t* nes)
 		nes->mapper_write = mapper2_write;
 		nes->mapper_data = malloc(sizeof(mapper2_data));
 		memset(nes->mapper_data, 0, sizeof(mapper2_data));
+		break;
+	case 3:
+		nes->mapper_write = mapper3_write;
+		nes->mapper_data = malloc(sizeof(mapper3_data));
+		memset(nes->mapper_data, 0, sizeof(mapper3_data));
 		break;
 	case 4:
 		nes->mapper_write = mapper4_write;

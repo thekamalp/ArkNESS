@@ -46,6 +46,16 @@ struct mapper2_data {
 };
 
 // ------------------------------------------------------------
+// mapper 3 structs/constants
+
+const uint8_t MAPPER3_CHR_BANK_SIZE_LOG2 = 13;
+const uint32_t MAPPER3_CHR_BANK_MASK = (1 << MAPPER3_CHR_BANK_SIZE_LOG2) - 1;
+
+struct mapper3_data {
+	uint8_t chr_bank;
+};
+
+// ------------------------------------------------------------
 // mapper 4 struct/constants
 
 // mask to distinguish which register is being programmed
