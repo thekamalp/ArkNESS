@@ -293,8 +293,11 @@ void nessys_init(nessys_t* nes)
 	nes->main_font = nes->gfx->CreateFont(&fdesc);
 
 	nesmenu_init(nes);
+	nes->num_joy = 0;
+	memset(nes->joy_data, 0, 2 * sizeof(nesjoy_data));
 
 	nes->win->SetKeyboardFunc(nessys_keyboard);
+	nes->win->SetJoystickFunc(nessys_joystick_added, nessys_joystick_removed, nessys_joystick_move, nessys_joystick_button);
 	nes->win->SetDisplayFunc(nessys_display);
 	nes->win->SetIdleFunc(nessys_display);
 }
@@ -1262,15 +1265,110 @@ void K3CALLBACK nessys_keyboard(void* ptr, k3key k, char c, k3keyState state)
 		break;
 	}
 
-	if (key_mask) {
+	if (key_mask && nes->num_joy < 2) {
 		if (state == k3keyState::RELEASED) {
-			nes->apu.joypad[0] &= ~key_mask;
+			nes->apu.joypad[nes->num_joy] &= ~key_mask;
 		} else {
-			nes->apu.joypad[0] |= key_mask;
+			nes->apu.joypad[nes->num_joy] |= key_mask;
 		}
 		if (nes->apu.joy_control & 0x1) {
 			nes->apu.latched_joypad[0] = nessys_masked_joypad(nes->apu.joypad[0]);
 			nes->apu.latched_joypad[1] = nessys_masked_joypad(nes->apu.joypad[1]);
+		}
+	}
+}
+
+void K3CALLBACK nessys_joystick_added(void* ptr, uint32_t joystick, const k3joyInfo* joy_info, const k3joyState* joy_state)
+{
+	nessys_t* nes = (nessys_t*)ptr;
+	if (nes->num_joy < 2) {
+		nes->joy_data[nes->num_joy].dev_id = joystick;
+		uint32_t a;
+		for (a = 0; a < joy_info->num_axes; a++) {
+			switch (joy_info->axis[a]) {
+			case k3joyAxis::X: nes->joy_data->x_axis = a; break;
+			case k3joyAxis::Y: nes->joy_data->y_axis = a; break;
+			case k3joyAxis::POV: nes->joy_data->pov_axis = a; break;
+			}
+		}
+		nes->joy_data[nes->num_joy].button_b = 0;
+		nes->joy_data[nes->num_joy].button_a = 1;
+		nes->joy_data[nes->num_joy].button_start = joy_info->num_buttons - 2;
+		nes->joy_data[nes->num_joy].button_select = joy_info->num_buttons - 1;
+		nes->num_joy++;
+	}
+}
+
+void K3CALLBACK nessys_joystick_removed(void* ptr, uint32_t joystick)
+{
+	nessys_t* nes = (nessys_t*)ptr;
+	bool remove = false;
+	uint32_t j;
+	for (j = 0; j < nes->num_joy; j++) {
+		if (nes->joy_data[j].dev_id == joystick) remove = true;
+		if (remove && j < nes->num_joy - 1) {
+			nes->joy_data[j] = nes->joy_data[j + 1];
+		}
+	}
+	if (remove) nes->num_joy--;
+}
+
+void K3CALLBACK nessys_joystick_move(void* ptr, uint32_t joystick, uint32_t axis_num, k3joyAxis axis, uint32_t ordinal, float position)
+{
+	nessys_t* nes = (nessys_t*)ptr;
+	uint32_t j;
+	uint8_t key_mask = 0, key_pressed = 0;
+	for (j = 0; j < nes->num_joy; j++) {
+		if (nes->joy_data[j].dev_id == joystick) {
+			if (nes->joy_data[j].x_axis == axis_num) {
+				key_mask = NESSYS_STD_CONTROLLER_BUTTON_LEFT_MASK | NESSYS_STD_CONTROLLER_BUTTON_RIGHT_MASK;
+				if (position > 0.75f) key_pressed = NESSYS_STD_CONTROLLER_BUTTON_RIGHT_MASK;
+				else if (position < 0.25f) key_pressed = NESSYS_STD_CONTROLLER_BUTTON_LEFT_MASK;
+			} else if (nes->joy_data[j].y_axis == axis_num) {
+				key_mask = NESSYS_STD_CONTROLLER_BUTTON_UP_MASK | NESSYS_STD_CONTROLLER_BUTTON_DOWN_MASK;
+				if (position > 0.75f) key_pressed = NESSYS_STD_CONTROLLER_BUTTON_DOWN_MASK;
+				else if (position < 0.25f) key_pressed = NESSYS_STD_CONTROLLER_BUTTON_UP_MASK;
+			} else if (nes->joy_data[j].pov_axis == axis_num) {
+				key_mask = NESSYS_STD_CONTROLLER_BUTTON_UP_MASK | NESSYS_STD_CONTROLLER_BUTTON_DOWN_MASK |
+					NESSYS_STD_CONTROLLER_BUTTON_LEFT_MASK | NESSYS_STD_CONTROLLER_BUTTON_RIGHT_MASK;
+				if (position <= 0.125f || position >= 0.875f) key_pressed |= NESSYS_STD_CONTROLLER_BUTTON_UP_MASK;
+				else if (position >= 0.375f && position <= 0.625f) key_pressed |= NESSYS_STD_CONTROLLER_BUTTON_DOWN_MASK;
+				if (position >= 0.125f && position <= 0.375f) key_pressed |= NESSYS_STD_CONTROLLER_BUTTON_RIGHT_MASK;
+				else if (position >= 0.625f && position <= 0.875f) key_pressed |= NESSYS_STD_CONTROLLER_BUTTON_LEFT_MASK;
+				if (position >= 1.0f) key_pressed = 0;
+			}
+			nes->apu.joypad[j] &= ~key_mask;
+			nes->apu.joypad[j] |= key_pressed;
+			if (nes->apu.joy_control & 0x1) {
+				nes->apu.latched_joypad[0] = nessys_masked_joypad(nes->apu.joypad[0]);
+				nes->apu.latched_joypad[1] = nessys_masked_joypad(nes->apu.joypad[1]);
+			}
+		}
+	}
+}
+
+void K3CALLBACK nessys_joystick_button(void* ptr, uint32_t joystick, uint32_t button, k3keyState state)
+{
+	nessys_t* nes = (nessys_t*)ptr;
+	uint32_t j;
+	uint8_t key_mask = 0;
+	for (j = 0; j < nes->num_joy; j++) {
+		if (nes->joy_data[j].dev_id == joystick) {
+			if (nes->joy_data[j].button_a == button) key_mask = NESSYS_STD_CONTROLLER_BUTTON_A_MASK;
+			else if (nes->joy_data[j].button_b == button) key_mask = NESSYS_STD_CONTROLLER_BUTTON_B_MASK;
+			else if (nes->joy_data[j].button_start == button) key_mask = NESSYS_STD_CONTROLLER_BUTTON_START_MASK;
+			else if (nes->joy_data[j].button_select == button) key_mask = NESSYS_STD_CONTROLLER_BUTTON_SELECT_MASK;
+		}
+		if (key_mask) {
+			if (state == k3keyState::RELEASED) {
+				nes->apu.joypad[j] &= ~key_mask;
+			} else {
+				nes->apu.joypad[j] |= key_mask;
+			}
+			if (nes->apu.joy_control & 0x1) {
+				nes->apu.latched_joypad[0] = nessys_masked_joypad(nes->apu.joypad[0]);
+				nes->apu.latched_joypad[1] = nessys_masked_joypad(nes->apu.joypad[1]);
+			}
 		}
 	}
 }

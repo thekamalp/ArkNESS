@@ -358,6 +358,17 @@ struct nessys_cbuffer_m9_t {
 
 const uint32_t NESSYS_MAX_CBUFFER_SIZE = sizeof(nessys_cbuffer_t) + sizeof(nessys_cbuffer_m9_t);
 
+struct nesjoy_data {
+	uint32_t dev_id;
+	int32_t x_axis;
+	int32_t y_axis;
+	int32_t pov_axis;
+	uint32_t button_a;
+	uint32_t button_b;
+	uint32_t button_start;
+	uint32_t button_select;
+};
+
 struct nessys_t {
 	uint32_t mapper_id;
 	uint32_t (*mapper_bg_setup)(nessys_t* nes, uint32_t phase);
@@ -438,6 +449,8 @@ struct nessys_t {
 	k3timer timer;
 	k3font main_font;
 	nesmenu_data menu;
+	uint32_t num_joy;
+	nesjoy_data joy_data[2];
 	uint8_t coord_scoreboard[256 * NESSYS_PPU_SCANLINES_RENDERED];
 };
 
@@ -465,6 +478,10 @@ bool nessys_init_mapper(nessys_t* nes);
 void nessys_default_memmap(nessys_t* nes);
 void nessys_scale_to_back_buffer(nessys_t* nes);
 void K3CALLBACK nessys_keyboard(void* ptr, k3key k, char c, k3keyState state);
+void K3CALLBACK nessys_joystick_added(void* ptr, uint32_t joystick, const k3joyInfo* joy_info, const k3joyState* joy_state);
+void K3CALLBACK nessys_joystick_removed(void* ptr, uint32_t joystick);
+void K3CALLBACK nessys_joystick_move(void* ptr, uint32_t joystick, uint32_t axis_num, k3joyAxis axis, uint32_t ordinal, float position);
+void K3CALLBACK nessys_joystick_button(void* ptr, uint32_t joystick, uint32_t button, k3keyState state);
 void K3CALLBACK nessys_display(void* ptr);
 bool nessys_add_mid_scan_bank_change(nessys_t* nes);
 uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles);

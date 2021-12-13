@@ -44,6 +44,7 @@ struct nesmenu_data {
 	uint32_t cur_list_size;
 	uint32_t cur_list_alloc_size;
 	std::string message_box;
+	uint8_t last_joypad_state[2];
 };
 
 const uint32_t nesmenu_main_items = 3;
