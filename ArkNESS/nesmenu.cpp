@@ -151,6 +151,8 @@ void nesmenu_display(nessys_t* nes)
 					if (nes->menu.cur_list[nes->menu.select].flag & NESMENU_ITEM_FLAG_DIRECTORY) {
 						if (nes->menu.cur_list[nes->menu.select].flag & NESMENU_ITEM_FLAG_UP_DIR) {
 							size_t pos = nes->menu.cur_dir.rfind(NESMENU_DIR_SEPARATOR);
+							size_t lpos = nes->menu.cur_dir.find(NESMENU_DIR_SEPARATOR);
+							if (lpos == pos) pos++;
 							if (pos != 0 && pos != std::string::npos) {
 								nes->menu.cur_dir = nes->menu.cur_dir.substr(0, pos);
 							}

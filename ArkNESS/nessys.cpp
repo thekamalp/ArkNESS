@@ -577,7 +577,7 @@ void nessys_gen_sound(nessys_t* nes)
 	static float t = 0.0f;
 	static bool playing = false;
 	uint32_t s;
-	uint32_t max_wr_size = NESSYS_SND_BYTES_PER_BUFFER - 20;
+	uint32_t max_wr_size = NESSYS_SND_BYTES_PER_BUFFER - NESSYS_SND_BYTES_SKEW;
 	uint32_t cur_wr_size = (nes->apu.sample_frac_generated >> NESSYS_SND_SAMPLES_FRAC_LOG2) * (NESSYS_SND_BITS_PER_SAMPLE / 8);
 	max_wr_size = (cur_wr_size > max_wr_size) ? 0 : max_wr_size -= cur_wr_size;
 
@@ -589,7 +589,7 @@ void nessys_gen_sound(nessys_t* nes)
 		uint32_t play_pos = nes->sb_main->GetPlayPosition();
 		uint32_t wr_pos = nes->sbuf_frame_start;
 		if (wr_pos < play_pos) wr_pos += NESSYS_SND_BYTES;
-		if (wr_pos - play_pos < 3 * NESSYS_SND_BYTES_PER_BUFFER) wr_size += 40;// else wr_size -= 20;
+		if (wr_pos - play_pos < (NESSYS_SND_BUFFERS / 2) * NESSYS_SND_BYTES_PER_BUFFER) wr_size += 2 * NESSYS_SND_BYTES_SKEW;
 	}
 	nes->apu.sample_frac_generated = end_sample_frac;
 
@@ -1753,7 +1753,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 			case NESSYS_APU_REG_START_BANK:
 				if (offset >= NESSYS_APU_JOYPAD0_OFFSET && offset <= NESSYS_APU_JOYPAD1_OFFSET) {
 					uint8_t j = offset - NESSYS_APU_JOYPAD0_OFFSET;
-					nes->apu.reg[offset] = nes->apu.latched_joypad[j] & 0x1;
+					nes->apu.reg[offset] = (nes->apu.latched_joypad[j] & 0x1) | (0x40);
 					//if ((nes->apu.joy_control & 0x1) == 0x0) {
 					//	nes->apu.latched_joypad[j] >>= 1;
 					//}
@@ -2599,6 +2599,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 						uint8_t j = offset - NESSYS_APU_JOYPAD0_OFFSET;
 						if ((nes->apu.joy_control & 0x1) == 0x0) {
 							nes->apu.latched_joypad[j] >>= 1;
+							nes->apu.latched_joypad[j] |= 0x80;
 						}
 						break;
 					}

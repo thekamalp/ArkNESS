@@ -7,6 +7,21 @@
 #pragma once
 #include "nessys.h"
 
+// return smallest mask that covers all btis of the input
+inline uint8_t nes_get_mask(uint8_t n)
+{
+	uint8_t mask;
+	for (mask = 0x80; mask != 0; mask = mask >> 1) {
+		if (n & mask) {
+			mask--;
+			mask <<= 1;
+			mask |= 1;
+			break;
+		}
+	}
+	return mask;
+}
+
 // ------------------------------------------------------------
 // mapper 1 structs/constants
 

@@ -294,9 +294,10 @@ bool mapper3_write(nessys_t* nes, uint16_t addr, uint8_t data)
 	uint8_t* chr_mem_base = (nes->ppu.chr_rom_base != NULL) ? nes->ppu.chr_rom_base : nes->ppu.chr_ram_base;
 	uint32_t chr_mem_size = (nes->ppu.chr_rom_base != NULL) ? nes->ppu.chr_rom_size : nes->ppu.chr_ram_size;
 	uint16_t max_chr_rom_bank_offset = (chr_mem_size >> MAPPER3_CHR_BANK_SIZE_LOG2) + ((chr_mem_size * MAPPER3_CHR_BANK_MASK) ? 1 : 0);
+	uint8_t bank_mask = nes_get_mask((uint8_t)max_chr_rom_bank_offset);
 	mapper3_data* m3_data = (mapper3_data*)nes->mapper_data;
 	uint8_t data_changed = m3_data->chr_bank;
-	m3_data->chr_bank = data % max_chr_rom_bank_offset;
+	m3_data->chr_bank = (data & bank_mask) % max_chr_rom_bank_offset;
 	data_changed ^= m3_data->chr_bank;
 
 	uint8_t b;
