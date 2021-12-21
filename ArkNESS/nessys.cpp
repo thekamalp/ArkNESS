@@ -888,7 +888,6 @@ void K3CALLBACK nessys_display(void* ptr)
 					for (m = 0; m < nes->last_num_mid_scan_ntb_bank_changes; m++) {
 						scan_right = nes->mid_scan_ntb_bank_change_position[m];
 						scan_right |= (scan_right == 0) << 8;  // make 0 into 256
-						scan_right = 64 + 2 * scan_right;
 						cb_data = static_cast<nessys_cbuffer_t*>(nes->cb_upload[nes->cb_main_cpu_version]->MapForWrite(sizeof(nessys_cbuffer_exp_t)));
 						memcpy(cb_data->ppu, nes->ppu.reg, 4 * sizeof(uint32_t));
 						memcpy(cb_data->sprite, nes->ppu.oam, 4 * 16 * sizeof(uint32_t));
