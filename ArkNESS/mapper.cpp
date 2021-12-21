@@ -270,9 +270,7 @@ bool mapper2_write(nessys_t* nes, uint16_t addr, uint8_t data)
 {
 	uint16_t max_prg_rom_bank_offset = (nes->prg_rom_size >> MAPPER2_PRG_BANK_SIZE_LOG2) + ((nes->prg_rom_size & MAPPER2_PRG_BANK_MASK) ? 1 : 0);
 	mapper2_data* m2_data = (mapper2_data*)nes->mapper_data;
-	uint8_t data_changed = m2_data->prg_bank;
 	m2_data->prg_bank = (data & 0xf) % max_prg_rom_bank_offset;
-	data_changed &= m2_data->prg_bank;
 
 	uint32_t offset;
 	uint8_t b;
@@ -284,7 +282,7 @@ bool mapper2_write(nessys_t* nes, uint16_t addr, uint8_t data)
 		offset += NESSYS_PRG_BANK_SIZE;
 	}
 
-	return (data_changed) ? true : false;
+	return false;// (data_changed) ? true : false;
 }
 
 // ------------------------------------------------------------

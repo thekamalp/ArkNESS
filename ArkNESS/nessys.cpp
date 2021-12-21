@@ -800,6 +800,10 @@ void K3CALLBACK nessys_display(void* ptr)
 	k3rect scissor;
 	int i, c, index;
 	do {
+		while (nes->scanline_cycle > (int32_t)NESSYS_PPU_CLK_PER_SCANLINE) {
+			nes->scanline_cycle -= (int32_t)NESSYS_PPU_CLK_PER_SCANLINE;
+			nes->scanline++;
+		}
 		if (nes->ppu.scroll_y_changed) {
 			uint16_t old_scroll_y = nes->ppu.scroll_y;
 			nes->ppu.scroll_y -= nes->scanline;
@@ -2618,9 +2622,13 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					// we only re-render frame if bits that change rendering changes
 					ppu_ever_written = ppu_ever_written || (data_change & 0x29);
 					if ((data_change & 0x10) && (nes->ppu.reg[1] & 0x08)) {
-						nes->ppu.reg[0] ^= 0x10;
-						ppu_ever_written = nessys_add_mid_scan_bank_change(nes) || ppu_ever_written;
-						nes->ppu.reg[0] ^= 0x10;
+						if (nes->scanline_cycle < 256) {
+							nes->ppu.reg[0] ^= 0x10;
+							ppu_ever_written = nessys_add_mid_scan_bank_change(nes) || ppu_ever_written;
+							nes->ppu.reg[0] ^= 0x10;
+						} else {
+							ppu_ever_written = true;
+						}
 					}
 					break;
 				case 0x1:
