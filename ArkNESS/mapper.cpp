@@ -739,7 +739,7 @@ uint32_t mapper5_bg_setup(nessys_t* nes, uint32_t phase)
 		//nes->gfx->k2AttachConstantGroup(nes->cg_exp_background);
 		//nes->gfx->k2AttachTextureGroup(nes->tg_exp_background);
 	}
-	memcpy(cb_exp_data->cbuf.ppu, nes->ppu.reg, 4 * sizeof(uint32_t));
+	memcpy(cb_exp_data->cbuf.ppu, nes->ppu.reg, 4 * sizeof(uint32_t) + 240);
 	memcpy(cb_exp_data->cbuf.sprite, nes->ppu.oam, 4 * 16 * sizeof(uint32_t));
 	index = NESSYS_CHR_ROM_WIN_MIN;
 	for (i = 0; i < 8; i++) {
@@ -797,7 +797,7 @@ uint32_t mapper5_sprite_setup(nessys_t* nes, uint32_t phase)
 	}
 
 	nessys_cbuffer_t* cb_data = static_cast<nessys_cbuffer_t*>(nes->cb_upload[nes->cb_main_cpu_version]->MapForWrite(sizeof(nessys_cbuffer_exp_t)));
-	memcpy(cb_data->ppu, nes->ppu.reg, 4 * sizeof(uint32_t));
+	memcpy(cb_data->ppu, nes->ppu.reg, 4 * sizeof(uint32_t) + 240);
 	memcpy(cb_data->sprite, nes->ppu.oam, 4 * 16 * sizeof(uint32_t));
 	index = NESSYS_CHR_ROM_WIN_MIN;
 	for (i = 0; i < 8; i++) {

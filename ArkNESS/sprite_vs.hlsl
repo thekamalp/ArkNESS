@@ -6,6 +6,7 @@
 
 cbuffer cbuf : register(b0) {
 	uint4 ppu;
+	uint4 scroll_x[15];
 	uint4 sprite[16];
 };
 

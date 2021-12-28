@@ -311,6 +311,7 @@ struct nessys_ppu_t {
 	uint8_t scroll[2];
 	uint16_t pad;
 	uint16_t scroll_y;
+	uint8_t scroll_x[240];
 	uint16_t mem_addr;
 	uint16_t t_mem_addr;
 	uint8_t addr_toggle;
@@ -340,6 +341,7 @@ struct nessys_cpu_backtrace_t {
 
 struct nessys_cbuffer_t {
 	uint32_t ppu[4];
+	uint8_t scroll_x[240];
 	uint32_t sprite[4 * 16];
 	uint32_t pattern[4 * 512];
 	float palette[4 * 32];
@@ -408,6 +410,8 @@ struct nessys_t {
 	int32_t scissor_top_y;
 	int32_t scissor_right_x;
 	int32_t scissor_bottom_y;
+	int32_t scroll_x_scanline;
+	uint32_t mapper_bg_setup_type;
 	uint32_t num_mid_scan_ntb_bank_changes;
 	uint32_t last_num_mid_scan_ntb_bank_changes;
 	uint8_t mid_scan_ntb_bank_change_position[NESSYS_MAX_MID_SCAN_NTB_BANK_CHANGES];

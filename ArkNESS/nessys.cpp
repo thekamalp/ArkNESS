@@ -804,13 +804,6 @@ void K3CALLBACK nessys_display(void* ptr)
 			nes->scanline_cycle -= (int32_t)NESSYS_PPU_CLK_PER_SCANLINE;
 			nes->scanline++;
 		}
-		if (nes->ppu.scroll_y_changed) {
-			uint16_t old_scroll_y = nes->ppu.scroll_y;
-			nes->ppu.scroll_y -= nes->scanline;
-			if ((nes->ppu.scroll_y & 0x100) != (old_scroll_y & 0x100) && ((old_scroll_y & 0xff) < 240)) nes->ppu.scroll_y -= 16;
-			nes->ppu.scroll_y_changed = false;
-			//nes->ppu.scroll_y = 237;
-		}
 
 		nes->cmd_buf->Reset();
 		nes->cmd_buf->TransitionResource(nes->win->GetBackBuffer()->GetResource(), k3resourceState::RENDER_TARGET);
@@ -829,18 +822,42 @@ void K3CALLBACK nessys_display(void* ptr)
 			palette[4 * i + 3] = ((i & 0x3) == 0) ? 0.0f : 1.0f;
 		}
 		cb_data = static_cast<nessys_cbuffer_t*>(nes->cb_upload[nes->cb_main_cpu_version]->MapForWrite(sizeof(nessys_cbuffer_exp_t)));
-		memcpy(cb_data->ppu, nes->ppu.reg, 4 * sizeof(uint32_t));
-		memcpy(cb_data->sprite, nes->ppu.oam, 4 * 16 * sizeof(uint32_t));
-		index = NESSYS_CHR_ROM_WIN_MIN;
-		for (i = 0; i < 8; i++) {
-			memcpy(cb_data->pattern + (i << 8), nessys_ppu_mem(nes, index), 1024);
-			index += 1024;
-		}
-		memcpy(cb_data->palette, palette, 4 * 32 * sizeof(float));
-		index = NESSYS_CHR_NTB_WIN_MIN;
-		for (i = 0; i < 4; i++) {
-			memcpy(cb_data->nametable + (i << 8), nessys_ppu_mem(nes, index), 1024);
-			index += 1024;
+		if (nes->scroll_x_scanline <= 0) {
+			if (nes->ppu.scroll_y_changed) {
+				uint16_t old_scroll_y = nes->ppu.scroll_y;
+				nes->ppu.scroll_y -= nes->scanline;
+				if ((nes->ppu.scroll_y & 0x100) != (old_scroll_y & 0x100) && ((old_scroll_y & 0xff) < 240)) nes->ppu.scroll_y -= 16;
+				nes->ppu.scroll_y_changed = false;
+				//nes->ppu.scroll_y = 237;
+			}
+
+			memcpy(cb_data->ppu, nes->ppu.reg, 4 * sizeof(uint32_t) + 240);
+			memcpy(cb_data->sprite, nes->ppu.oam, 4 * 16 * sizeof(uint32_t));
+			index = NESSYS_CHR_ROM_WIN_MIN;
+			for (i = 0; i < 8; i++) {
+				memcpy(cb_data->pattern + (i << 8), nessys_ppu_mem(nes, index), 1024);
+				index += 1024;
+			}
+			memcpy(cb_data->palette, palette, 4 * 32 * sizeof(float));
+			index = NESSYS_CHR_NTB_WIN_MIN;
+			for (i = 0; i < 4; i++) {
+				memcpy(cb_data->nametable + (i << 8), nessys_ppu_mem(nes, index), 1024);
+				index += 1024;
+			}
+			scissor.x = 0;
+			scissor.y = nes->scanline;
+			scissor.width = 256;
+			scissor.height = 240 - nes->scanline;
+		} else {
+			uint32_t prev_cb_main_version = (nes->cb_main_cpu_version == 0) ? nessys_t::NUM_CPU_VERSIONS - 1 : nes->cb_main_cpu_version - 1;
+			nessys_cbuffer_t* cb_src_data = static_cast<nessys_cbuffer_t*>(nes->cb_upload[prev_cb_main_version]->MapForWrite(sizeof(nessys_cbuffer_exp_t)));
+			memcpy(cb_data, cb_src_data, sizeof(nessys_cbuffer_t));
+			nes->cb_upload[prev_cb_main_version]->Unmap();
+			memcpy(cb_data->scroll_x, nes->ppu.scroll_x, 240);
+			scissor.x = 0;
+			scissor.y = nes->scroll_x_scanline;
+			scissor.width = 256;
+			scissor.height = 240 - nes->scroll_x_scanline;
 		}
 		nes->cb_upload[nes->cb_main_cpu_version]->Unmap();
 
@@ -860,10 +877,6 @@ void K3CALLBACK nessys_display(void* ptr)
 		//	printf("scanline %d ppureg[0]: 0x%x scroll: %d %d %d ppu addr 0x%x\n",
 		//		nes->scanline, nes->ppu.reg[0], nes->ppu.scroll[0], nes->ppu.scroll[1], nes->ppu.scroll_y, nes->ppu.mem_addr);
 
-		scissor.x = 0;
-		scissor.y = nes->scanline;
-		scissor.width = 256;
-		scissor.height = 240 - nes->scanline;
 		nes->cmd_buf->SetScissor(&scissor);
 
 		nes->cmd_buf->SetVertexBuffer(0, nes->vb_fullscreen);
@@ -874,12 +887,12 @@ void K3CALLBACK nessys_display(void* ptr)
 			uint32_t phase = 0;
 			while (mapper_setup & NESSYS_MAPPER_SETUP_DRAW_INCOMPLETE) {
 				nes->scissor_left_x = 8 - ((nes->ppu.reg[1] << 2) & 0x8);
-				nes->scissor_top_y = nes->scanline;
+				nes->scissor_top_y = (nes->scroll_x_scanline > 0) ? nes->scroll_x_scanline : nes->scanline;
 				nes->scissor_right_x = 256;
 				nes->scissor_bottom_y = 240;
 
 				mapper_setup = nes->mapper_bg_setup(nes, phase);
-
+				nes->mapper_bg_setup_type = mapper_setup;
 				if (!(mapper_setup & NESSYS_MAPPER_SETUP_CUSTOM)) {
 					nes->cmd_buf->SetGfxState(nes->st_background);
 
@@ -889,7 +902,7 @@ void K3CALLBACK nessys_display(void* ptr)
 						scan_right = nes->mid_scan_ntb_bank_change_position[m];
 						scan_right |= (scan_right == 0) << 8;  // make 0 into 256
 						cb_data = static_cast<nessys_cbuffer_t*>(nes->cb_upload[nes->cb_main_cpu_version]->MapForWrite(sizeof(nessys_cbuffer_exp_t)));
-						memcpy(cb_data->ppu, nes->ppu.reg, 4 * sizeof(uint32_t));
+						memcpy(cb_data->ppu, nes->ppu.reg, 4 * sizeof(uint32_t) + 240);
 						memcpy(cb_data->sprite, nes->ppu.oam, 4 * 16 * sizeof(uint32_t));
 						index = NESSYS_CHR_ROM_WIN_MIN;
 						for (i = 0; i < 8; i++) {
@@ -930,7 +943,7 @@ void K3CALLBACK nessys_display(void* ptr)
 						upload_version += nes->cb_main_cpu_version - nes->last_num_mid_scan_ntb_bank_changes - 1;
 
 						//cb_data = static_cast<nessys_cbuffer_t*>(nes->cb_upload[nes->cb_main_cpu_version]->MapForWrite(sizeof(nessys_cbuffer_exp_t)));
-						//memcpy(cb_data->ppu, nes->ppu.reg, 4 * sizeof(uint32_t));
+						//memcpy(cb_data->ppu, nes->ppu.reg, 4 * sizeof(uint32_t) + 240);
 						//memcpy(cb_data->sprite, nes->ppu.oam, 4 * 16 * sizeof(uint32_t));
 						//index = NESSYS_CHR_ROM_WIN_MIN;
 						//for (i = 0; i < 8; i++) {
@@ -972,7 +985,7 @@ void K3CALLBACK nessys_display(void* ptr)
 			uint32_t phase = 0;
 			while (mapper_setup & NESSYS_MAPPER_SETUP_DRAW_INCOMPLETE) {
 				nes->scissor_left_x = 8 - ((nes->ppu.reg[1] << 1) & 0x8);
-				nes->scissor_top_y = nes->scanline;
+				nes->scissor_top_y = (nes->scroll_x_scanline > 0) ? nes->scroll_x_scanline : nes->scanline;
 				nes->scissor_right_x = 256;
 				nes->scissor_bottom_y = 240;
 
@@ -1023,185 +1036,186 @@ void K3CALLBACK nessys_display(void* ptr)
 		nes->cmd_buf->Close();
 		nes->gfx->SubmitCmdBuf(nes->cmd_buf);
 
-		// compute sprite0 hit
-		if ((nes->ppu.reg[0x1] & 0x18) && ((nes->ppu.reg[2] & 0x40)==0x0)) {
-			// sprite and background rendering must be enabled
-			uint32_t sprite_x = nes->ppu.oam[3];
-			uint32_t sprite_y = nes->ppu.oam[0] + 1;
-			if (sprite_y < 240) {
-				uint32_t global_x = nes->ppu.scroll[0] + ((nes->ppu.reg[0] & 0x01) << 8) + sprite_x;
-				uint32_t global_y = nes->ppu.scroll_y                                    + sprite_y;
-				if (((nes->ppu.scroll_y & 0xFF) < 240) && ((nes->ppu.scroll_y & 0xFF) + sprite_y >= 240)) global_y += 16;
-				if (((nes->ppu.scroll_y & 0xFF) >=240) && ((nes->ppu.scroll_y & 0xFF) + sprite_y >= 256)) global_y -= 256;
-				uint32_t ntb_addr = ((global_x & 0xF8) >> 3) | ((global_y & 0xF8) << 2) | ((global_x & 0x100) << 2) | ((global_y & 0x100) << 3);
-				uint32_t pat_addr = (*nessys_ppu_mem(nes, NESSYS_CHR_NTB_WIN_MIN + ntb_addr) << 4) | ((nes->ppu.reg[0] & 0x10) << 8);
-				//printf("gx/y: 0x%x 0x%x ntb_addr: 0x%x pat_addr: 0x%x ", global_x, global_y, ntb_addr, pat_addr);
-				uint64_t bg_pattern[6];
-				bg_pattern[0] = *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr));
-				bg_pattern[0] |= *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr + 8));
-				global_x += 8;
-				ntb_addr = ((global_x & 0xF8) >> 3) | ((global_y & 0xF8) << 2) | ((global_x & 0x100) << 2) | ((global_y & 0x100) << 3);
-				pat_addr = (*nessys_ppu_mem(nes, NESSYS_CHR_NTB_WIN_MIN + ntb_addr) << 4) | ((nes->ppu.reg[0] & 0x10) << 8);
-				bg_pattern[1] = *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr));
-				bg_pattern[1] |= *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr + 8));
-				if (((global_y & 0xFF) >= 240) && ((global_y & 0xFF) + 8) >= 256) global_y -= 256;
-				if (((global_y & 0xFF) < 240) && ((global_y & 0xFF) + 8) >= 240) global_y += 16;
-				global_y += 8;
-				ntb_addr = ((global_x & 0xF8) >> 3) | ((global_y & 0xF8) << 2) | ((global_x & 0x100) << 2) | ((global_y & 0x100) << 3);
-				pat_addr = (*nessys_ppu_mem(nes, NESSYS_CHR_NTB_WIN_MIN + ntb_addr) << 4) | ((nes->ppu.reg[0] & 0x10) << 8);
-				bg_pattern[3] = *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr));
-				bg_pattern[3] |= *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr + 8));
-				global_x -= 8;
-				ntb_addr = ((global_x & 0xF8) >> 3) | ((global_y & 0xF8) << 2) | ((global_x & 0x100) << 2) | ((global_y & 0x100) << 3);
-				pat_addr = (*nessys_ppu_mem(nes, NESSYS_CHR_NTB_WIN_MIN + ntb_addr) << 4) | ((nes->ppu.reg[0] & 0x10) << 8);
-				bg_pattern[2] = *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr));
-				bg_pattern[2] |= *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr + 8));
-				if (((global_y & 0xFF) >= 240) && ((global_y & 0xFF) + 8) >= 256) global_y -= 256;
-				if (((global_y & 0xFF) < 240) && ((global_y & 0xFF) + 8) >= 240) global_y += 16;
-				global_y += 8;
-				ntb_addr = ((global_x & 0xF8) >> 3) | ((global_y & 0xF8) << 2) | ((global_x & 0x100) << 2) | ((global_y & 0x100) << 3);
-				pat_addr = (*nessys_ppu_mem(nes, NESSYS_CHR_NTB_WIN_MIN + ntb_addr) << 4) | ((nes->ppu.reg[0] & 0x10) << 8);
-				bg_pattern[4] = *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr));
-				bg_pattern[4] |= *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr + 8));
-				global_x += 8;
-				ntb_addr = ((global_x & 0xF8) >> 3) | ((global_y & 0xF8) << 2) | ((global_x & 0x100) << 2) | ((global_y & 0x100) << 3);
-				pat_addr = (*nessys_ppu_mem(nes, NESSYS_CHR_NTB_WIN_MIN + ntb_addr) << 4) | ((nes->ppu.reg[0] & 0x10) << 8);
-				bg_pattern[5] = *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr));
-				bg_pattern[5] |= *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr + 8));
-				uint64_t sp_pattern[2];
-				uint32_t sp_addr = (nes->ppu.reg[0] & 0x20) ? ((nes->ppu.oam[1] & 0x1) << 8) : ((nes->ppu.reg[0] & 0x08) << 5) | (nes->ppu.oam[1] & 0x1);
-				sp_addr |= nes->ppu.oam[1] & 0xFE;
-				sp_addr <<= 4;
-				sp_pattern[0] = *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + sp_addr));
-				sp_pattern[0] |= *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + sp_addr + 8));
-				sp_addr += 16;
-				sp_pattern[1] = *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + sp_addr));
-				sp_pattern[1] |= *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + sp_addr + 8));
-				uint32_t local_x = global_x & 0x7;
-				uint32_t local_y = global_y & 0x7;
-				uint64_t x_mask = (0xFF << local_x) & 0xFF;
-				x_mask |= (x_mask << 8);
-				x_mask |= (x_mask << 16);
-				x_mask |= (x_mask << 32);
-				uint64_t y_mask = 0;
-				y_mask = ~y_mask >> (8 * local_y);
-				bg_pattern[0] = ((bg_pattern[0] << local_x) >> (8 * local_y)) & x_mask & y_mask;
-				bg_pattern[0] |= ((bg_pattern[1] >> (8 - local_x)) >> (8 * local_y)) & ~x_mask & y_mask;
-				bg_pattern[0] |= ((bg_pattern[2] << local_x) << (8 * (8 - local_y))) & x_mask & ~y_mask;
-				bg_pattern[0] |= ((bg_pattern[3] >> (8 - local_x)) << (8 * (8 - local_y))) & ~x_mask & ~y_mask;
-				bg_pattern[1] = ((bg_pattern[2] << local_x) >> (8 * local_y)) & x_mask & y_mask;
-				bg_pattern[1] |= ((bg_pattern[3] >> (8 - local_x)) >> (8 * local_y)) & ~x_mask & y_mask;
-				bg_pattern[1] |= ((bg_pattern[4] << local_x) << (8 * (8 - local_y))) & x_mask & ~y_mask;
-				bg_pattern[1] |= ((bg_pattern[5] >> (8 - local_x)) << (8 * (8 - local_y))) & ~x_mask & ~y_mask;
+		if (nes->scroll_x_scanline <= 0) {
+			// compute sprite0 hit
+			if ((nes->ppu.reg[0x1] & 0x18) && ((nes->ppu.reg[2] & 0x40) == 0x0)) {
+				// sprite and background rendering must be enabled
+				uint32_t sprite_x = nes->ppu.oam[3];
+				uint32_t sprite_y = nes->ppu.oam[0] + 1;
+				if (sprite_y < 240) {
+					uint32_t global_x = nes->ppu.scroll[0] + ((nes->ppu.reg[0] & 0x01) << 8) + sprite_x;
+					uint32_t global_y = nes->ppu.scroll_y + sprite_y;
+					if (((nes->ppu.scroll_y & 0xFF) < 240) && ((nes->ppu.scroll_y & 0xFF) + sprite_y >= 240)) global_y += 16;
+					if (((nes->ppu.scroll_y & 0xFF) >= 240) && ((nes->ppu.scroll_y & 0xFF) + sprite_y >= 256)) global_y -= 256;
+					uint32_t ntb_addr = ((global_x & 0xF8) >> 3) | ((global_y & 0xF8) << 2) | ((global_x & 0x100) << 2) | ((global_y & 0x100) << 3);
+					uint32_t pat_addr = (*nessys_ppu_mem(nes, NESSYS_CHR_NTB_WIN_MIN + ntb_addr) << 4) | ((nes->ppu.reg[0] & 0x10) << 8);
+					//printf("gx/y: 0x%x 0x%x ntb_addr: 0x%x pat_addr: 0x%x ", global_x, global_y, ntb_addr, pat_addr);
+					uint64_t bg_pattern[6];
+					bg_pattern[0] = *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr));
+					bg_pattern[0] |= *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr + 8));
+					global_x += 8;
+					ntb_addr = ((global_x & 0xF8) >> 3) | ((global_y & 0xF8) << 2) | ((global_x & 0x100) << 2) | ((global_y & 0x100) << 3);
+					pat_addr = (*nessys_ppu_mem(nes, NESSYS_CHR_NTB_WIN_MIN + ntb_addr) << 4) | ((nes->ppu.reg[0] & 0x10) << 8);
+					bg_pattern[1] = *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr));
+					bg_pattern[1] |= *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr + 8));
+					if (((global_y & 0xFF) >= 240) && ((global_y & 0xFF) + 8) >= 256) global_y -= 256;
+					if (((global_y & 0xFF) < 240) && ((global_y & 0xFF) + 8) >= 240) global_y += 16;
+					global_y += 8;
+					ntb_addr = ((global_x & 0xF8) >> 3) | ((global_y & 0xF8) << 2) | ((global_x & 0x100) << 2) | ((global_y & 0x100) << 3);
+					pat_addr = (*nessys_ppu_mem(nes, NESSYS_CHR_NTB_WIN_MIN + ntb_addr) << 4) | ((nes->ppu.reg[0] & 0x10) << 8);
+					bg_pattern[3] = *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr));
+					bg_pattern[3] |= *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr + 8));
+					global_x -= 8;
+					ntb_addr = ((global_x & 0xF8) >> 3) | ((global_y & 0xF8) << 2) | ((global_x & 0x100) << 2) | ((global_y & 0x100) << 3);
+					pat_addr = (*nessys_ppu_mem(nes, NESSYS_CHR_NTB_WIN_MIN + ntb_addr) << 4) | ((nes->ppu.reg[0] & 0x10) << 8);
+					bg_pattern[2] = *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr));
+					bg_pattern[2] |= *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr + 8));
+					if (((global_y & 0xFF) >= 240) && ((global_y & 0xFF) + 8) >= 256) global_y -= 256;
+					if (((global_y & 0xFF) < 240) && ((global_y & 0xFF) + 8) >= 240) global_y += 16;
+					global_y += 8;
+					ntb_addr = ((global_x & 0xF8) >> 3) | ((global_y & 0xF8) << 2) | ((global_x & 0x100) << 2) | ((global_y & 0x100) << 3);
+					pat_addr = (*nessys_ppu_mem(nes, NESSYS_CHR_NTB_WIN_MIN + ntb_addr) << 4) | ((nes->ppu.reg[0] & 0x10) << 8);
+					bg_pattern[4] = *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr));
+					bg_pattern[4] |= *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr + 8));
+					global_x += 8;
+					ntb_addr = ((global_x & 0xF8) >> 3) | ((global_y & 0xF8) << 2) | ((global_x & 0x100) << 2) | ((global_y & 0x100) << 3);
+					pat_addr = (*nessys_ppu_mem(nes, NESSYS_CHR_NTB_WIN_MIN + ntb_addr) << 4) | ((nes->ppu.reg[0] & 0x10) << 8);
+					bg_pattern[5] = *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr));
+					bg_pattern[5] |= *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + pat_addr + 8));
+					uint64_t sp_pattern[2];
+					uint32_t sp_addr = (nes->ppu.reg[0] & 0x20) ? ((nes->ppu.oam[1] & 0x1) << 8) : ((nes->ppu.reg[0] & 0x08) << 5) | (nes->ppu.oam[1] & 0x1);
+					sp_addr |= nes->ppu.oam[1] & 0xFE;
+					sp_addr <<= 4;
+					sp_pattern[0] = *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + sp_addr));
+					sp_pattern[0] |= *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + sp_addr + 8));
+					sp_addr += 16;
+					sp_pattern[1] = *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + sp_addr));
+					sp_pattern[1] |= *((uint64_t*)nessys_ppu_mem(nes, NESSYS_CHR_ROM_WIN_MIN + sp_addr + 8));
+					uint32_t local_x = global_x & 0x7;
+					uint32_t local_y = global_y & 0x7;
+					uint64_t x_mask = (0xFF << local_x) & 0xFF;
+					x_mask |= (x_mask << 8);
+					x_mask |= (x_mask << 16);
+					x_mask |= (x_mask << 32);
+					uint64_t y_mask = 0;
+					y_mask = ~y_mask >> (8 * local_y);
+					bg_pattern[0] = ((bg_pattern[0] << local_x) >> (8 * local_y)) & x_mask & y_mask;
+					bg_pattern[0] |= ((bg_pattern[1] >> (8 - local_x)) >> (8 * local_y)) & ~x_mask & y_mask;
+					bg_pattern[0] |= ((bg_pattern[2] << local_x) << (8 * (8 - local_y))) & x_mask & ~y_mask;
+					bg_pattern[0] |= ((bg_pattern[3] >> (8 - local_x)) << (8 * (8 - local_y))) & ~x_mask & ~y_mask;
+					bg_pattern[1] = ((bg_pattern[2] << local_x) >> (8 * local_y)) & x_mask & y_mask;
+					bg_pattern[1] |= ((bg_pattern[3] >> (8 - local_x)) >> (8 * local_y)) & ~x_mask & y_mask;
+					bg_pattern[1] |= ((bg_pattern[4] << local_x) << (8 * (8 - local_y))) & x_mask & ~y_mask;
+					bg_pattern[1] |= ((bg_pattern[5] >> (8 - local_x)) << (8 * (8 - local_y))) & ~x_mask & ~y_mask;
 
-				// slip sprite, if needed
-				uint64_t hit_mask;
-				uint32_t s, max_s = (nes->ppu.reg[0] & 0x20) ? 2 : 1;
-				if (nes->ppu.oam[2] & 0x40) {
-					// flip horizontally
+					// slip sprite, if needed
+					uint64_t hit_mask;
+					uint32_t s, max_s = (nes->ppu.reg[0] & 0x20) ? 2 : 1;
+					if (nes->ppu.oam[2] & 0x40) {
+						// flip horizontally
+						for (s = 0; s < max_s; s++) {
+							sp_pattern[s] = ((sp_pattern[s] & 0xF0F0F0F0F0F0F0F0ULL) >> 4) | ((sp_pattern[s] & 0x0F0F0F0F0F0F0F0FULL) << 4);
+							sp_pattern[s] = ((sp_pattern[s] & 0xCCCCCCCCCCCCCCCCULL) >> 2) | ((sp_pattern[s] & 0x3333333333333333ULL) << 2);
+							sp_pattern[s] = ((sp_pattern[s] & 0xAAAAAAAAAAAAAAAAULL) >> 1) | ((sp_pattern[s] & 0x5555555555555555ULL) << 1);
+						}
+					}
+					if (nes->ppu.oam[2] & 0x80) {
+						// flip vertically
+						if (max_s == 2) {
+							// swap the upper and lower sprites
+							hit_mask = sp_pattern[0];
+							sp_pattern[0] = sp_pattern[1];
+							sp_pattern[1] = hit_mask;
+						}
+						for (s = 0; s < max_s; s++) {
+							sp_pattern[s] = ((sp_pattern[s] & 0xFFFFFFFF00000000ULL) >> 32) | ((sp_pattern[s] & 0x00000000FFFFFFFFULL) << 32);
+							sp_pattern[s] = ((sp_pattern[s] & 0xFFFF0000FFFF0000ULL) >> 16) | ((sp_pattern[s] & 0x0000FFFF0000FFFFULL) << 16);
+							sp_pattern[s] = ((sp_pattern[s] & 0xFF00FF00FF00FF00ULL) >> 8) | ((sp_pattern[s] & 0x00FF00FF00FF00FFULL) << 8);
+						}
+					}
+
+					// check if sprite is partially outside the view
+					x_mask = 0xFF;
+					if (((nes->ppu.reg[1] & 0x06) != 0x06) && sprite_x < 8) {
+						// if either background or tile clipping is enabled, don't test pixels coordinates below 8
+						x_mask >>= 8 - sprite_x;
+					} else if (sprite_x > 247) {
+						x_mask <<= sprite_x - 247;
+						x_mask &= 0xFF;
+					}
+					x_mask |= (x_mask << 8);
+					x_mask |= (x_mask << 16);
+					x_mask |= (x_mask << 32);
+
+					y_mask = 0;
+					y_mask = ~y_mask;
+					if (sprite_y > 232) {
+						y_mask >>= 8 * (sprite_y - 232);
+						sp_pattern[0] &= y_mask;
+						sp_pattern[1] = 0;
+					} else if (sprite_y > 224) {
+						y_mask >>= 8 * (sprite_y - 224);
+						sp_pattern[1] &= y_mask;
+					}
+
+					bool sprite0_hit = false;
+					uint32_t hit_x = 0, hit_y = 0;
+					uint32_t x, y;
 					for (s = 0; s < max_s; s++) {
-						sp_pattern[s] = ((sp_pattern[s] & 0xF0F0F0F0F0F0F0F0ULL) >> 4) | ((sp_pattern[s] & 0x0F0F0F0F0F0F0F0FULL) << 4);
-						sp_pattern[s] = ((sp_pattern[s] & 0xCCCCCCCCCCCCCCCCULL) >> 2) | ((sp_pattern[s] & 0x3333333333333333ULL) << 2);
-						sp_pattern[s] = ((sp_pattern[s] & 0xAAAAAAAAAAAAAAAAULL) >> 1) | ((sp_pattern[s] & 0x5555555555555555ULL) << 1);
-					}
-				}
-				if (nes->ppu.oam[2] & 0x80) {
-					// flip vertically
-					if (max_s == 2) {
-						// swap the upper and lower sprites
-						hit_mask = sp_pattern[0];
-						sp_pattern[0] = sp_pattern[1];
-						sp_pattern[1] = hit_mask;
-					}
-					for (s = 0; s < max_s; s++) {
-						sp_pattern[s] = ((sp_pattern[s] & 0xFFFFFFFF00000000ULL) >> 32) | ((sp_pattern[s] & 0x00000000FFFFFFFFULL) << 32);
-						sp_pattern[s] = ((sp_pattern[s] & 0xFFFF0000FFFF0000ULL) >> 16) | ((sp_pattern[s] & 0x0000FFFF0000FFFFULL) << 16);
-						sp_pattern[s] = ((sp_pattern[s] & 0xFF00FF00FF00FF00ULL) >> 8) | ((sp_pattern[s] & 0x00FF00FF00FF00FFULL) << 8);
-					}
-				}
-
-				// check if sprite is partially outside the view
-				x_mask = 0xFF;
-				if (((nes->ppu.reg[1] & 0x06) != 0x06) && sprite_x < 8) {
-					// if either background or tile clipping is enabled, don't test pixels coordinates below 8
-					x_mask >>= 8 - sprite_x;
-				} else if (sprite_x > 247) {
-					x_mask <<= sprite_x - 247;
-					x_mask &= 0xFF;
-				}
-				x_mask |= (x_mask << 8);
-				x_mask |= (x_mask << 16);
-				x_mask |= (x_mask << 32);
-
-				y_mask = 0;
-				y_mask = ~y_mask;
-				if (sprite_y > 232) {
-					y_mask >>= 8 * (sprite_y - 232);
-					sp_pattern[0] &= y_mask;
-					sp_pattern[1] = 0;
-				}
-				else if (sprite_y > 224) {
-					y_mask >>= 8 * (sprite_y - 224);
-					sp_pattern[1] &= y_mask;
-				}
-
-				bool sprite0_hit = false;
-				uint32_t hit_x = 0, hit_y = 0;
-				uint32_t x, y;
-				for (s = 0; s < max_s; s++) {
-					hit_mask = sp_pattern[s] & bg_pattern[s] & x_mask;
-					if (hit_mask) {
-						for (y = 0; y < 8 && !sprite0_hit; y++) {
-							if (hit_mask & 0xFF) {
-								for (x = 0; x < 8 && !sprite0_hit; x++) {
-									if (hit_mask & 0x80) {
-										sprite0_hit = true;
-										hit_x = sprite_x + x;
-										hit_y = sprite_y + 8 * s + y;
+						hit_mask = sp_pattern[s] & bg_pattern[s] & x_mask;
+						if (hit_mask) {
+							for (y = 0; y < 8 && !sprite0_hit; y++) {
+								if (hit_mask & 0xFF) {
+									for (x = 0; x < 8 && !sprite0_hit; x++) {
+										if (hit_mask & 0x80) {
+											sprite0_hit = true;
+											hit_x = sprite_x + x;
+											hit_y = sprite_y + 8 * s + y;
+										} else {
+											hit_mask <<= 1;
+										}
 									}
-									else {
-										hit_mask <<= 1;
-									}
+								} else {
+									hit_mask >>= 8;
 								}
-							}
-							else {
-								hit_mask >>= 8;
 							}
 						}
 					}
-				}
-				//printf("sprite0 pos: %d %d scan/cyc: %d/%d", sprite_x, sprite_y, nes->scanline, nes->scanline_cycle);
-				if (sprite0_hit) {
-					if ((int32_t)hit_y < nes->scanline) {
-						nes->sprite0_hit_cycles = 1;
+					//printf("sprite0 pos: %d %d scan/cyc: %d/%d", sprite_x, sprite_y, nes->scanline, nes->scanline_cycle);
+					if (sprite0_hit) {
+						if ((int32_t)hit_y < nes->scanline) {
+							nes->sprite0_hit_cycles = 1;
+						} else {
+							nes->sprite0_hit_cycles = NESSYS_PPU_CLK_PER_SCANLINE * (hit_y - nes->scanline) + hit_x - nes->scanline_cycle;
+						}
+						//printf(" - hit %d\n", nes->sprite0_hit_cycles);
 					} else {
-						nes->sprite0_hit_cycles = NESSYS_PPU_CLK_PER_SCANLINE * (hit_y - nes->scanline) + hit_x - nes->scanline_cycle;
-					}
-					//printf(" - hit %d\n", nes->sprite0_hit_cycles);
-				} else {
-					//printf(" - miss\n");
+						//printf(" - miss\n");
 
+					}
 				}
 			}
-		}
 
-		// need to only do this if sprtes have changed position
-		nessys_gen_scanline_sprite_map(&(nes->ppu));
+			// need to only do this if sprtes have changed position
+			nessys_gen_scanline_sprite_map(&(nes->ppu));
 
-		if ((nes->apu.frame_counter & 0xc0) == 0) {
-			// if were 4-step mode, and IRQ disable is 0, then we can produce an interrupt
-			//uint32_t frac_until_frame_irq = ((0x4 * NESSYS_SND_SAMPLES_PER_BUFFER) << NESSYS_SND_FRAME_FRAC_LOG2) - (NESSYS_SND_SAMPLES_PER_BUFFER * nes->apu.frame_frac_counter);
-			uint32_t cycles_until_frame_irq = NESSYS_PPU_CLK_PER_SCANLINE * NESSYS_PPU_SCANLINES_RENDERED - (NESSYS_PPU_CLK_PER_SCANLINE * nes->scanline) - nes->scanline_cycle;
-			if (nes->frame_irq_cycles == 0 /* || nes->frame_irq_cycles > cycles_until_frame_irq*/) nes->frame_irq_cycles = cycles_until_frame_irq;
+			if ((nes->apu.frame_counter & 0xc0) == 0) {
+				// if were 4-step mode, and IRQ disable is 0, then we can produce an interrupt
+				//uint32_t frac_until_frame_irq = ((0x4 * NESSYS_SND_SAMPLES_PER_BUFFER) << NESSYS_SND_FRAME_FRAC_LOG2) - (NESSYS_SND_SAMPLES_PER_BUFFER * nes->apu.frame_frac_counter);
+				uint32_t cycles_until_frame_irq = NESSYS_PPU_CLK_PER_SCANLINE * NESSYS_PPU_SCANLINES_RENDERED - (NESSYS_PPU_CLK_PER_SCANLINE * nes->scanline) - nes->scanline_cycle;
+				if (nes->frame_irq_cycles == 0 /* || nes->frame_irq_cycles > cycles_until_frame_irq*/) nes->frame_irq_cycles = cycles_until_frame_irq;
+			} else {
+				nes->frame_irq_cycles = 0;
+				nes->apu.reg[NESSYS_APU_STATUS_OFFSET] &= ~0x40;
+			}
+
+			nes->mapper_cpu_setup(nes);
+			cycles = nessys_exec_cpu_cycles(nes, 0);
+			//printf("executed %d cycles; cycles remaining %d\n", cycles, nes->cycles_remaining);
 		} else {
-			nes->frame_irq_cycles = 0;
-			nes->apu.reg[NESSYS_APU_STATUS_OFFSET] &= ~0x40;
+			nes->scroll_x_scanline = 0;
 		}
-
-		nes->mapper_cpu_setup(nes);
-		cycles = nessys_exec_cpu_cycles(nes, 0);
-		//printf("executed %d cycles; cycles remaining %d\n", cycles, nes->cycles_remaining);
-	} while (nes->cycles_remaining > 100);
+	} while ((nes->cycles_remaining > 100) || (nes->scroll_x_scanline > 0));
 
 	nessys_scale_to_back_buffer(nes);
 
@@ -2609,6 +2623,9 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				}
 			}
 			if (ppu_write) {
+				bool custom_bg_setup = (nes->mapper_bg_setup_type & NESSYS_MAPPER_SETUP_CUSTOM) ? true : false;
+				int32_t scroll_start = (nes->scanline < 0) ? 0 : nes->scanline;// +1;
+				bool scroll_x_changed = false;
 				//printf("ppu_write offset 0x%x addr: 0x%x data: 0x%x scanline: %d scan cycle: %d data_change 0x%x %d\n", 
 				//	offset, nes->ppu.mem_addr, (offset == 0x14) ? nes->apu.reg[0x14] : nes->ppu.reg[offset], nes->scanline, nes->scanline_cycle, data_change, ppu_ever_written);
 				if (bank == NESSYS_PPU_REG_START_BANK) {
@@ -2644,9 +2661,9 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					nes->ppu.reg[3]++;
 					break;
 				case 0x5:
+					scroll_x_changed = (nes->ppu.scroll_x[scroll_start] != nes->ppu.reg[5]);
 					// only update if the scroll value actually changed, and only in x direction (y updates at next frame)
-					ppu_ever_written = ppu_ever_written || ((nes->ppu.addr_toggle == 0) && (nes->ppu.scroll[0] != nes->ppu.reg[5]));
-					nes->ppu.scroll[nes->ppu.addr_toggle] = nes->ppu.reg[5];
+					ppu_ever_written = ppu_ever_written || ((nes->ppu.addr_toggle == 0) && scroll_x_changed && (custom_bg_setup || (nes->num_mid_scan_ntb_bank_changes != 0)));
 					// update the vram address as well
 					//printf("update ppu addr for scroll %d %d %d addr: 0x%x\n", nes->ppu.scroll[0], nes->ppu.scroll[1], nes->ppu.scroll_y, nes->ppu.mem_addr);
 					//printf("ppu wr 2005: toggle %d 0x%x\n", nes->ppu.addr_toggle, nes->ppu.reg[5]);
@@ -2657,7 +2674,22 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					} else {
 						nes->ppu.t_mem_addr &= 0xffe0;
 						nes->ppu.t_mem_addr |= (nes->ppu.reg[5] >> 3) & 0x1f;
+						if (nes->scanline < -1) {
+							memset(nes->ppu.scroll_x, nes->ppu.reg[5], 240);
+						} else if(nes->scanline < 239) {
+							if (nes->scanline_cycle < 256) {
+								nes->ppu.scroll_x[scroll_start] = nes->ppu.reg[5];
+							} else {
+								nes->ppu.scroll_x[scroll_start] &= 0xF8;
+								nes->ppu.scroll_x[scroll_start] |= nes->ppu.reg[5] & 0x7;
+							}
+							memset(&(nes->ppu.scroll_x[scroll_start + 1]), nes->ppu.reg[5], 240 - 1 - scroll_start);
+							if (!ppu_ever_written && nes->scroll_x_scanline <= 0 && scroll_x_changed) {
+								nes->scroll_x_scanline = scroll_start;
+							}
+						}
 					}
+					nes->ppu.scroll[nes->ppu.addr_toggle] = nes->ppu.reg[5];
 					nes->ppu.addr_toggle = !nes->ppu.addr_toggle;
 					break;
 				case 0x6:
@@ -2674,6 +2706,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 						nes->ppu.scroll[0] |= (nes->ppu.reg[6] << 3) & 0xf8;
 						nes->ppu.scroll[1] &= 0xc7;
 						nes->ppu.scroll[1] |= (nes->ppu.reg[6] >> 2) & 0x38;
+						memset(&(nes->ppu.scroll_x[scroll_start]), nes->ppu.scroll[0], 240 - scroll_start);
 					} else {
 						nes->ppu.scroll[1] &= 0x38;
 						nes->ppu.scroll[1] |= (nes->ppu.reg[6] << 6) & 0xc0;

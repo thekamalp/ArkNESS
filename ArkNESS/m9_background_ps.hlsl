@@ -4,6 +4,7 @@
 
 cbuffer cbuf : register(b0) {
 	uint4 ppu;
+	uint4 scroll_x[15];
 	uint4 sprite[16];
 	uint4 pattern[512];
 	float4 palette[32];
@@ -22,8 +23,13 @@ struct VS_OUTPUT {
 float4 main(VS_OUTPUT i) : SV_TARGET
 {
 	float4 o_color;
+	uint scanline = (uint) i.pos.y;
+	uint scroll_x_index = scanline >> 4;
+	uint scroll_x_sub_index = (scanline >> 2) & 0x3;
+	uint scroll_x_shift = (scanline & 0x3) << 3;
 	//uint2 n_pos = floor(0.5*(i_pos.xy - float2(64.5, 0.5)));
 	float2 f_pos = i.texcoord.xy;
+	f_pos.x += (scroll_x[scroll_x_index][scroll_x_sub_index] >> scroll_x_shift) & 0xFF;
 	f_pos.y += 256.0 * (i.texcoord.y < 0);
 	uint2 n_pos = (uint2) floor(f_pos);
 	uint max_y = (uint) floor(i.texcoord.z);
