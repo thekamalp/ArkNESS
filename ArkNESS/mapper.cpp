@@ -282,7 +282,7 @@ bool mapper2_write(nessys_t* nes, uint16_t addr, uint8_t data)
 		offset += NESSYS_PRG_BANK_SIZE;
 	}
 
-	return false;// (data_changed) ? true : false;
+	return false;
 }
 
 // ------------------------------------------------------------
@@ -1446,6 +1446,40 @@ void mapper69_reset(nessys_t* nes)
 }
 
 // ------------------------------------------------------------
+// mapper 180 functions
+bool mapper180_write(nessys_t* nes, uint16_t addr, uint8_t data)
+{
+	uint16_t max_prg_rom_bank_offset = (nes->prg_rom_size >> MAPPER180_PRG_BANK_SIZE_LOG2) + ((nes->prg_rom_size & MAPPER180_PRG_BANK_MASK) ? 1 : 0);
+	mapper180_data* m2_data = (mapper180_data*)nes->mapper_data;
+	m2_data->prg_bank = (data & 0xf) % max_prg_rom_bank_offset;
+
+	uint32_t offset;
+	uint8_t b;
+	const uint8_t HALF_BANK = NESSYS_PRG_ROM_START_BANK + (NESSYS_PRG_NUM_BANKS - NESSYS_PRG_ROM_START_BANK) / 2;
+	offset = (m2_data->prg_bank & 0xf) << MAPPER180_PRG_BANK_SIZE_LOG2;
+	for (b = HALF_BANK; b < NESSYS_PRG_NUM_BANKS; b++) {
+		nes->prg_rom_bank[b] = nes->prg_rom_base + offset;
+		nes->prg_rom_bank_mask[b] = NESSYS_PRG_MEM_MASK;
+		offset += NESSYS_PRG_BANK_SIZE;
+	}
+
+	return false;
+}
+
+void mapper180_reset(nessys_t* nes)
+{
+	uint32_t offset;
+	uint8_t b;
+	const uint8_t HALF_BANK = NESSYS_PRG_ROM_START_BANK + (NESSYS_PRG_NUM_BANKS - NESSYS_PRG_ROM_START_BANK) / 2;
+	offset = 0;
+	for (b = NESSYS_PRG_ROM_START_BANK; b < HALF_BANK; b++) {
+		nes->prg_rom_bank[b] = nes->prg_rom_base + offset;
+		nes->prg_rom_bank_mask[b] = NESSYS_PRG_MEM_MASK;
+		offset += NESSYS_PRG_BANK_SIZE;
+	}
+}
+
+// ------------------------------------------------------------
 // general mapper load and unload functions
 bool nessys_init_mapper(nessys_t* nes)
 {
@@ -1518,6 +1552,12 @@ bool nessys_init_mapper(nessys_t* nes)
 		nes->mapper_data = malloc(sizeof(mapper69_data));
 		memset(nes->mapper_data, 0, sizeof(mapper69_data));
 		mapper69_reset(nes);
+		break;
+	case 180:
+		nes->mapper_write = mapper180_write;
+		nes->mapper_data = malloc(sizeof(mapper180_data));
+		memset(nes->mapper_data, 0, sizeof(mapper180_data));
+		mapper180_reset(nes);
 		break;
 	default:
 		printf("Uknown mapper id: %d\n", nes->mapper_id);

@@ -328,3 +328,14 @@ struct mapper69_data {
 	uint8_t prg_bank[4];
 	uint8_t chr_bank[8];
 };
+
+// ------------------------------------------------------------
+// mapper 180 structs/constants
+
+const uint8_t MAPPER180_PRG_BANK_SIZE_LOG2 = 14;
+const uint32_t MAPPER180_PRG_BANK_MASK = (1 << MAPPER2_PRG_BANK_SIZE_LOG2) - 1;
+
+struct mapper180_data {
+	uint8_t prg_bank;
+};
+
