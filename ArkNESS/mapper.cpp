@@ -664,8 +664,6 @@ uint32_t mapper5_bg_setup(nessys_t* nes, uint32_t phase)
 		// vertical split is enabled
 		int32_t split_pos = (m5_data->vsplit_mode & 0x1f) << 3;
 		if (split_pos) split_pos -= nes->ppu.scroll[0] & 0x7;
-		split_pos <<= 1;
-		split_pos += 64;
 		if (phase == 0) {
 			nes->scissor_right_x = split_pos;
 			// save away the scroll information
@@ -700,6 +698,7 @@ uint32_t mapper5_bg_setup(nessys_t* nes, uint32_t phase)
 			nes->ppu.scroll[0] = 0;
 			nes->ppu.scroll[1] = m5_data->vsplit_scroll;
 			nes->ppu.scroll_y = m5_data->vsplit_scroll;
+			memset(&(nes->ppu.scroll_x[nes->scanline]), nes->ppu.scroll[0], 240 - nes->scanline);
 		} else {
 			// use default chr banks
 			mapper5_update_chr_map(nes, true);
@@ -709,6 +708,7 @@ uint32_t mapper5_bg_setup(nessys_t* nes, uint32_t phase)
 			nes->ppu.scroll[0] = m5_data->scroll_save[0];
 			nes->ppu.scroll[1] = m5_data->scroll_save[1];
 			nes->ppu.scroll_y = m5_data->scroll_save_y;
+			memset(&(nes->ppu.scroll_x[nes->scanline]), nes->ppu.scroll[0], 240 - nes->scanline);
 		}
 		// if phase is one, we're done; otherwise we're not
 		mapper_setup |= (phase) ? NESSYS_MAPPER_SETUP_DEFAULT : NESSYS_MAPPER_SETUP_DRAW_INCOMPLETE;
