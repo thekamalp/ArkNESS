@@ -818,7 +818,7 @@ void K3CALLBACK nessys_display(void* ptr)
 		for (i = 0; i < NESSYS_PPU_PAL_SIZE; i++) {
 			for (c = 0; c < 3; c++) {
 				index = ((i & 0x3) == 0) ? 0 : i;
-				palette[4 * i + c] = NESSYS_PPU_PALETTE[3 * nes->ppu.pal[index] + c];
+				palette[4 * i + c] = NESSYS_PPU_PALETTE[3 * (nes->ppu.pal[index] & 0x3f)+ c];
 			}
 			palette[4 * i + 3] = ((i & 0x3) == 0) ? 0.0f : 1.0f;
 		}
