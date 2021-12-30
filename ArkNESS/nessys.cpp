@@ -796,6 +796,7 @@ void K3CALLBACK nessys_display(void* ptr)
 	nes->ppu.scroll_y_changed = true;
 	nes->cycles_remaining += NESSYS_PPU_SCANLINES_RENDERED_CLKS + NESSYS_PPU_SCANLINES_POST_RENDER_CLKS; // 241 scanlines
 	nes->last_num_mid_scan_ntb_bank_changes = 0;
+	nes->prev_last_num_mid_scan_ntb_bank_changes = 0;
 	nessys_cbuffer_t* cb_data;
 	k3rect scissor;
 	int i, c, index;
@@ -847,7 +848,7 @@ void K3CALLBACK nessys_display(void* ptr)
 			scissor.x = 0;
 			scissor.y = nes->scanline;
 			scissor.width = 256;
-			scissor.height = 240 - nes->scanline;
+			scissor.height = 240 - scissor.y;
 		} else {
 			uint32_t prev_cb_main_version = (nes->cb_main_cpu_version == 0) ? nessys_t::NUM_CPU_VERSIONS - 1 : nes->cb_main_cpu_version - 1;
 			nessys_cbuffer_t* cb_src_data = static_cast<nessys_cbuffer_t*>(nes->cb_upload[prev_cb_main_version]->MapForWrite(sizeof(nessys_cbuffer_exp_t)));
@@ -857,7 +858,7 @@ void K3CALLBACK nessys_display(void* ptr)
 			scissor.x = 0;
 			scissor.y = nes->scroll_x_scanline;
 			scissor.width = 256;
-			scissor.height = 240 - nes->scroll_x_scanline;
+			scissor.height = 240 - scissor.y;
 		}
 		nes->cb_upload[nes->cb_main_cpu_version]->Unmap();
 
@@ -895,6 +896,9 @@ void K3CALLBACK nessys_display(void* ptr)
 				nes->mapper_bg_setup_type = mapper_setup;
 				if (!(mapper_setup & NESSYS_MAPPER_SETUP_CUSTOM)) {
 					nes->cmd_buf->SetGfxState(nes->st_background);
+					if (nes->last_num_mid_scan_ntb_bank_changes != nes->prev_last_num_mid_scan_ntb_bank_changes && nes->scissor_top_y > 0) {
+						nes->scissor_top_y--;
+					}
 
 					uint8_t m;
 					uint16_t scan_right;
@@ -2826,6 +2830,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 
 			if (nes->num_mid_scan_ntb_bank_changes != nes->last_num_mid_scan_ntb_bank_changes) {
 				ppu_ever_written = true;
+				nes->prev_last_num_mid_scan_ntb_bank_changes = nes->last_num_mid_scan_ntb_bank_changes;
 				nes->last_num_mid_scan_ntb_bank_changes = nes->num_mid_scan_ntb_bank_changes;
 			}
 			nes->num_mid_scan_ntb_bank_changes = 0;
