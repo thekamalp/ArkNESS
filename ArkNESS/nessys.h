@@ -173,11 +173,11 @@ const uint32_t NESSYS_SND_FRAME_FRAC_PER_SAMPLE = (4 << NESSYS_SND_FRAME_FRAC_LO
 
 // system structs
 struct nessys_cpu_regs_t {
+	uint16_t pc;
 	uint8_t a;
 	uint8_t x;
 	uint8_t y;
 	uint8_t s;
-	uint16_t pc;
 	uint8_t p;
 	uint8_t pad0;
 };
@@ -332,7 +332,7 @@ struct nessys_ppu_t {
 	uint8_t scanline_sprite_id[NESSYS_PPU_SCANLINES_RENDERED][NESSYS_PPU_MAX_SPRITES_PER_SCALINE];
 };
 
-const uint32_t NESSYS_NUM_CPU_BACKTRACE_ENTRIES = 128;
+const uint32_t NESSYS_NUM_CPU_BACKTRACE_ENTRIES = 1024;
 struct nessys_cpu_backtrace_t {
 	int32_t scanline;
 	int32_t scanline_cycle;
@@ -390,6 +390,9 @@ struct nessys_t {
 	uint32_t mapper_irq_cycles;   // cycles until mapper (external) irq signal is set; if 0, no irq pending
 	uint32_t frame_irq_cycles;    // cycles until a frame irq signal is set; if 0, no irq pending
 	uint32_t dmc_irq_cycles;      // cycles until a dmc irq signal is set; if 0, no irq pending
+	uint32_t dmc_bits_to_play;
+	uint32_t dmc_bit_timer;
+	uint32_t dmc_buffer_full;
 	int32_t scanline;  // scanline number
 	int32_t scanline_cycle;  // cycles after the start of current scanline
 	uint32_t cpu_cycle_inc;

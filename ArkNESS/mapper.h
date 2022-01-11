@@ -330,6 +330,25 @@ struct mapper69_data {
 };
 
 // ------------------------------------------------------------
+// mapper 71 structs/constants
+
+const uint16_t MAPPER71_ADDR_MASK = 0xF000;
+
+const uint16_t MAPPER71_ADDR_MIRROR = 0x9000;
+const uint16_t MAPPER71_ADDR_BANK_SEL0 = 0xC000;
+const uint16_t MAPPER71_ADDR_BANK_SEL1 = 0xD000;
+const uint16_t MAPPER71_ADDR_BANK_SEL2 = 0xE000;
+const uint16_t MAPPER71_ADDR_BANK_SEL3 = 0xF000;
+
+const uint8_t MAPPER71_PRG_BANK_SIZE_LOG2 = 14;
+const uint32_t MAPPER71_PRG_BANK_MASK = (1 << MAPPER71_PRG_BANK_SIZE_LOG2) - 1;
+
+struct mapper71_data {
+	uint8_t mirror;
+	uint8_t prg_bank;
+};
+
+// ------------------------------------------------------------
 // mapper 180 structs/constants
 
 const uint8_t MAPPER180_PRG_BANK_SIZE_LOG2 = 14;

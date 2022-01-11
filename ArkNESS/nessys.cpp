@@ -13,6 +13,7 @@ void nessys_init(nessys_t* nes)
 	nes->apu.reg = nes->apu.reg_mem;
 	nes->apu.pulse[0].env.flags = NESSYS_APU_PULSE_FLAG_SWEEP_ONES_COMP;
 	nes->apu.noise.shift_reg = 0x01;
+	nes->apu.dmc.period = NESSYS_APU_DMC_PERIOD_TABLE[0];
 	nes->win = k3winObj::CreateWindowedWithFormat("ArkNESS", 0, 0, 512, 480, k3fmt::RGBA8_UNORM, 2 * nessys_t::NUM_GPU_VERSIONS + 1 + 2 + 2, 0);
 	nes->win->SetVisible(true);
 	nes->win->SetCursorVisible(true);
@@ -498,6 +499,7 @@ uint8_t nessys_apu_gen_dmc(nessys_t* nes)
 	if (dmc->bytes_remaining == 0 && (dmc->flags & NESSYS_APU_DMC_FLAG_DMA_ENABLE)) {
 		dmc->cur_addr = dmc->start_addr;
 		dmc->bytes_remaining = dmc->length;
+		dmc->bits_remaining = 0;
 	}
 	if (dmc->bits_remaining == 0 && dmc->bytes_remaining != 0) {
 		uint16_t bank, offset;
@@ -646,15 +648,6 @@ void nessys_gen_sound(nessys_t* nes)
 		//	nes->frame_irq_cycles = 0;
 		//	nes->apu.reg[NESSYS_APU_STATUS_OFFSET] &= ~0x40;
 		//}
-		if ((nes->apu.reg[0x10] & 0x80 && nes->apu.dmc.length != 0)) {
-			// generate a dmc interrupt
-			uint32_t cyces_until_dmc_interrupt = ((uint32_t)nes->apu.dmc.bytes_remaining * 8) + nes->apu.dmc.bits_remaining;
-			cyces_until_dmc_interrupt *= nes->apu.dmc.period;
-			if (nes->dmc_irq_cycles == 0 || nes->dmc_irq_cycles > cyces_until_dmc_interrupt) nes->dmc_irq_cycles = cyces_until_dmc_interrupt;
-		} else {
-			nes->dmc_irq_cycles = 0;
-			nes->apu.reg[NESSYS_APU_STATUS_OFFSET] &= ~0x80;
-		}
 	}
 }
 
@@ -815,10 +808,11 @@ void K3CALLBACK nessys_display(void* ptr)
 		nes->cmd_buf->ClearDepthTarget(nes->surf_depth, k3depthSelect::DEPTH_STENCIL, 1.0f, 0, NULL);
 
 		// initialize palette if rendering background or sprites
+		uint8_t palette_index_mask = (nes->ppu.reg[1] & 0x1) ? 0x30 : 0x3f;
 		for (i = 0; i < NESSYS_PPU_PAL_SIZE; i++) {
 			for (c = 0; c < 3; c++) {
 				index = ((i & 0x3) == 0) ? 0 : i;
-				palette[4 * i + c] = NESSYS_PPU_PALETTE[3 * (nes->ppu.pal[index] & 0x3f)+ c];
+				palette[4 * i + c] = NESSYS_PPU_PALETTE[3 * (nes->ppu.pal[index] & palette_index_mask)+ c];
 			}
 			palette[4 * i + 3] = ((i & 0x3) == 0) ? 0.0f : 1.0f;
 		}
@@ -1684,6 +1678,8 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 		bool frame_irq = (nes->frame_irq_cycles > 0 && nes->frame_irq_cycles < instruction_cycles);
 		bool dmc_irq = (nes->dmc_irq_cycles > 0 && nes->dmc_irq_cycles < instruction_cycles);
 		bool irq_interrupt = !(nes->reg.p & C6502_P_I) && (mapper_irq || frame_irq || dmc_irq);
+		nes->apu.reg[NESSYS_APU_STATUS_OFFSET] |= (frame_irq) ? 0x40 : 0x0;
+		nes->apu.reg[NESSYS_APU_STATUS_OFFSET] |= (dmc_irq) ? 0x80 : 0x0;
 		nes->cpu_cycle_inc = 0;
 		if (nes->cycles_remaining < (int32_t)instruction_cycles || vblank_interrupt) {
 			done = !vblank_interrupt;
@@ -1721,11 +1717,9 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 			if (mapper_irq) nes->mapper_irq_cycles = 1;
 			if (frame_irq) {
 				nes->frame_irq_cycles = 1;
-				nes->apu.reg[NESSYS_APU_STATUS_OFFSET] |= 0x40;
 			}
 			if (dmc_irq) {
 				nes->dmc_irq_cycles = 1;
-				nes->apu.reg[NESSYS_APU_STATUS_OFFSET] |= 0x80;
 			}
 
 			//printf("-----------------------------------> Mapper interrupt scanline: %d\n", nes->scanline);
@@ -1750,12 +1744,20 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 			// add debug info
 			nessys_add_backtrace(nes);
 
+			//if (nes->reg.pc == 0xb3b1 && nes->sysmem[0x30] > 0x1f) {
+			//if(nes->reg.pc == 0xe6a8 || nes->reg.pc == 0xe6ca) {
+			//if (nes->sysmem[0x30] > 0x20 &&
+			//	((nes->reg.pc >= 0xb3ae && nes->reg.pc <= 0xb3b8) ||
+			//	 (nes->reg.pc >= 0xb3c8 && nes->reg.pc <= 0xb3d4))) {
+			//	printf("pause\n");
+			//}
+
 			// move up the program counter
 			nes->reg.pc += op->num_bytes;
 
 			// check if we read the PPU, or APU
 			bool clear_frame_irq = false;
-			bool clear_dmc_irq = false;
+			//bool clear_dmc_irq = false;
 			switch (bank) {
 			case NESSYS_PPU_REG_START_BANK:
 				switch (offset) {
@@ -1784,10 +1786,10 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					nes->apu.reg[NESSYS_APU_STATUS_OFFSET] |= (nes->apu.pulse[1].length) ? 0x2 : 0x0;
 					nes->apu.reg[NESSYS_APU_STATUS_OFFSET] |= (nes->apu.triangle.length) ? 0x4 : 0x0;
 					nes->apu.reg[NESSYS_APU_STATUS_OFFSET] |= (nes->apu.noise.length) ? 0x8 : 0x0;
-					nes->apu.reg[NESSYS_APU_STATUS_OFFSET] |= (nes->apu.dmc.bytes_remaining) ? 0x10 : 0x0;
+					nes->apu.reg[NESSYS_APU_STATUS_OFFSET] |= (nes->dmc_bits_to_play >= 8) ? 0x10 : 0x0;
 					clear_frame_irq = true;
-				} else if(offset == 0x13) {
-					clear_dmc_irq = true;
+				//} else if(offset == 0x13) {
+				//	clear_dmc_irq = true;
 				} else if (offset >= NESSYS_APU_SIZE) {
 					uint8_t* op = nes->mapper_read(nes, addr);
 					if (op) operand = op;
@@ -2558,6 +2560,10 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					nes->apu.dmc.flags &= ~(NESSYS_APU_DMC_FLAG_IRQ_ENABLE | NESSYS_APU_DMC_FLAG_LOOP);
 					nes->apu.dmc.flags |= nes->apu.reg[0x10] & (NESSYS_APU_DMC_FLAG_IRQ_ENABLE | NESSYS_APU_DMC_FLAG_LOOP);
 					nes->apu.dmc.period = NESSYS_APU_DMC_PERIOD_TABLE[nes->apu.reg[0x10] & 0xf];
+					if (!(nes->apu.dmc.flags & NESSYS_APU_DMC_FLAG_IRQ_ENABLE)) {
+						nes->apu.reg[NESSYS_APU_STATUS_OFFSET] &= ~0x80;
+						nes->dmc_irq_cycles = 0;
+					}
 					break;
 				case 0x11:
 					nes->apu.dmc.output = nes->apu.reg[0x11] & 0x7f;
@@ -2567,7 +2573,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					break;
 				case 0x13:
 					nes->apu.dmc.length = (((uint16_t)nes->apu.reg[0x13]) << 4) + 1;
-					clear_dmc_irq = true;
+					//clear_dmc_irq = true;
 					break;
 				case NESSYS_APU_STATUS_OFFSET:
 					if (!(nes->apu.status & 0x1)) {
@@ -2585,12 +2591,42 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					if (!(nes->apu.status & 0x10)) {
 						nes->apu.dmc.bytes_remaining = 0;
 						nes->apu.dmc.flags &= ~NESSYS_APU_DMC_FLAG_DMA_ENABLE;
+						nes->dmc_bits_to_play &= 0x7;
+						nes->apu.reg[NESSYS_APU_STATUS_OFFSET] &= ~0x80;
+						nes->dmc_irq_cycles = 0;
 					} else {
 						if (nes->apu.dmc.bytes_remaining == 0) {
 							nes->apu.dmc.cur_addr = nes->apu.dmc.start_addr;
 							nes->apu.dmc.bytes_remaining = nes->apu.dmc.length;
+							nes->apu.dmc.bits_remaining = 0;
 						}
 						nes->apu.dmc.flags |= NESSYS_APU_DMC_FLAG_DMA_ENABLE;
+						if ((nes->dmc_bits_to_play & ~0x7) == 0) {
+							// a byte is immediately loaded if buffer is empty
+							uint32_t length = nes->apu.dmc.length - !nes->dmc_buffer_full;
+							//penalty_cycles += 4 * !nes->dmc_buffer_full;
+							nes->dmc_buffer_full = true;
+							nes->dmc_bits_to_play &= 0x7;
+							nes->dmc_bits_to_play |= (length << 3);
+							if (nes->dmc_bits_to_play < 8 && ((nes->apu.dmc.flags & (NESSYS_APU_DMC_FLAG_IRQ_ENABLE | NESSYS_APU_DMC_FLAG_LOOP)) == NESSYS_APU_DMC_FLAG_IRQ_ENABLE)) {
+								nes->dmc_irq_cycles = 1;
+								//nes->dmc_bits_to_play--;
+							} else {
+								nes->apu.reg[NESSYS_APU_STATUS_OFFSET] &= ~0x80;
+								nes->dmc_irq_cycles = 0;
+							}
+						} else {
+							nes->apu.reg[NESSYS_APU_STATUS_OFFSET] &= ~0x80;
+							nes->dmc_irq_cycles = 0;
+						}
+						//if ((nes->apu.reg[0x10] & 0x80) && !(nes->apu.reg[0x10] & 0x40) && nes->apu.dmc.length != 0) {
+						//	// generate a dmc interrupt
+						//	//uint32_t cycles_until_dmc_interrupt = ((uint32_t)nes->apu.dmc.bytes_remaining * 8);
+						//	//cycles_until_dmc_interrupt *= NESSYS_PPU_PER_CPU_CLK * (nes->apu.dmc.period);
+						//	nes->dmc_irq_cycles = 0xFFFFFFFF;// cycles_until_dmc_interrupt;
+						//} else {
+						//	nes->dmc_irq_cycles = 0;
+						//}
 					}
 					break;
 				case NESSYS_APU_JOYPAD0_OFFSET:
@@ -2764,14 +2800,42 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					nes->apu.reg[NESSYS_APU_STATUS_OFFSET] &= ~0x40;
 				}
 			}
-			if (clear_dmc_irq) {
-				if ((nes->apu.reg[0x13] & 0x80) == 0) {
-					nes->dmc_irq_cycles = 0;
-					nes->apu.reg[NESSYS_APU_STATUS_OFFSET] &= ~0x80;
-				}
-			}
+			//if (clear_dmc_irq) {
+			//	if ((nes->apu.reg[0x13] & 0x80) == 0) {
+			//		nes->dmc_irq_cycles = 0;
+			//		nes->apu.reg[NESSYS_APU_STATUS_OFFSET] &= ~0x80;
+			//	}
+			//}
 			nes->cpu_cycle_inc = op->num_cycles + penalty_cycles;
 		}
+
+		while (nes->dmc_bit_timer < (nes->cpu_cycle_inc)) {
+			if (nes->dmc_bits_to_play <= 8 && nes->dmc_buffer_full && ((nes->apu.dmc.flags & (NESSYS_APU_DMC_FLAG_IRQ_ENABLE | NESSYS_APU_DMC_FLAG_LOOP)) == NESSYS_APU_DMC_FLAG_IRQ_ENABLE))
+				nes->dmc_irq_cycles = 1;
+			if (nes->dmc_bits_to_play == 8 && (nes->apu.dmc.flags & NESSYS_APU_DMC_FLAG_LOOP)) {
+				nes->dmc_bits_to_play += ((uint32_t)nes->apu.dmc.length << 3);
+			}
+			//if (nes->dmc_bits_to_play == 0) {
+			//	if (nes->apu.dmc.flags & NESSYS_APU_DMC_FLAG_LOOP) {
+			//		nes->dmc_bits_to_play += ((uint32_t)nes->apu.dmc.length << 3);
+			//	} else {
+			//		nes->dmc_buffer_full = false;
+			//	}
+			//}
+
+			//if ((nes->dmc_bits_to_play & 0x7) == 0 && nes->dmc_buffer_full)
+			//	nes->cpu_cycle_inc += (nes->cpu_cycle_inc > 500) ? 2 : 4;
+
+			if (nes->dmc_bits_to_play == 0) {
+				nes->dmc_bits_to_play = 8;
+				nes->dmc_buffer_full = false;
+			}
+			nes->dmc_bits_to_play--;
+			//if (nes->dmc_bits_to_play) nes->dmc_bits_to_play--;
+			nes->dmc_bit_timer += nes->apu.dmc.period;
+		}
+		nes->dmc_bit_timer -= nes->cpu_cycle_inc;
+
 		cycle_count += NESSYS_PPU_PER_CPU_CLK*(nes->cpu_cycle_inc);
 		// cycles remaining may go negative if we have a oam dma transfer
 		// the cycle penalty is accounted for until after th decision has already been bade to execute it
@@ -2867,13 +2931,13 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				nes->frame_irq_cycles -= NESSYS_PPU_PER_CPU_CLK * (nes->cpu_cycle_inc);
 			}
 		}
-		if (nes->dmc_irq_cycles > 0) {
-			if (nes->dmc_irq_cycles <= NESSYS_PPU_PER_CPU_CLK * (nes->cpu_cycle_inc)) {
-				nes->dmc_irq_cycles = 1;
-			} else {
-				nes->dmc_irq_cycles -= NESSYS_PPU_PER_CPU_CLK * (nes->cpu_cycle_inc);
-			}
-		}
+		//if (nes->dmc_irq_cycles > 0) {
+		//	if (nes->dmc_irq_cycles <= NESSYS_PPU_PER_CPU_CLK * (nes->cpu_cycle_inc)) {
+		//		nes->dmc_irq_cycles = 1;
+		//	} else {
+		//		nes->dmc_irq_cycles -= NESSYS_PPU_PER_CPU_CLK * (nes->cpu_cycle_inc);
+		//	}
+		//}
 	}
 	return cycle_count;
 }

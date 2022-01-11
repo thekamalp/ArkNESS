@@ -1446,6 +1446,71 @@ void mapper69_reset(nessys_t* nes)
 }
 
 // ------------------------------------------------------------
+// mapper 71 functions
+void mapper71_update_name_tbl_map(nessys_t* nes)
+{
+	mapper71_data* m71_data = (mapper71_data*)nes->mapper_data;
+	if (m71_data->mirror & 0x10) {
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 0] = nes->ppu.mem + 0x400;
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 1] = nes->ppu.mem + 0x400;
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 2] = nes->ppu.mem + 0x400;
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 3] = nes->ppu.mem + 0x400;
+	} else {
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 0] = nes->ppu.mem;
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 1] = nes->ppu.mem;
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 2] = nes->ppu.mem;
+		nes->ppu.chr_rom_bank[NESSYS_CHR_NTB_START_BANK + 3] = nes->ppu.mem;
+	}
+}
+
+void mapper71_update_prg_bank(nessys_t* nes)
+{
+	mapper71_data* m71_data = (mapper71_data*)nes->mapper_data;
+	uint32_t offset;
+	uint8_t b;
+	const uint8_t HALF_BANK = NESSYS_PRG_ROM_START_BANK + (NESSYS_PRG_NUM_BANKS - NESSYS_PRG_ROM_START_BANK) / 2;
+	// first 16KB programmable
+	// second 16KB of addr space fixed to last 16KB in cart
+	offset = (m71_data->prg_bank & 0xf) << MAPPER71_PRG_BANK_SIZE_LOG2;
+	for (b = NESSYS_PRG_ROM_START_BANK; b < HALF_BANK; b++) {
+		nes->prg_rom_bank[b] = nes->prg_rom_base + offset;
+		nes->prg_rom_bank_mask[b] = NESSYS_PRG_MEM_MASK;
+		offset += NESSYS_PRG_BANK_SIZE;
+		if (offset >= nes->prg_rom_size) offset &= ~MAPPER71_PRG_BANK_MASK;
+	}
+	offset = nes->prg_rom_size - 0x4000;
+	for (b = HALF_BANK; b < NESSYS_PRG_NUM_BANKS; b++) {
+		nes->prg_rom_bank[b] = nes->prg_rom_base + offset;
+		nes->prg_rom_bank_mask[b] = NESSYS_PRG_MEM_MASK;
+		offset += NESSYS_PRG_BANK_SIZE;
+		if (offset >= nes->prg_rom_size) offset &= ~MAPPER71_PRG_BANK_MASK;
+	}
+}
+
+bool mapper71_write(nessys_t* nes, uint16_t addr, uint8_t data)
+{
+	uint8_t data_change = 0;
+	uint16_t max_prg_rom_bank_offset = (nes->prg_rom_size >> MAPPER71_PRG_BANK_SIZE_LOG2) + ((nes->prg_rom_size & MAPPER71_PRG_BANK_MASK) ? 1 : 0);
+	mapper71_data* m71_data = (mapper71_data*)nes->mapper_data;
+	switch (addr & MAPPER71_ADDR_MASK) {
+	case MAPPER71_ADDR_MIRROR:
+		data_change = m71_data->mirror;
+		m71_data->mirror = data & 0x10;
+		data_change ^= m71_data->mirror;
+		mapper71_update_name_tbl_map(nes);
+		break;
+	case MAPPER71_ADDR_BANK_SEL0:
+	case MAPPER71_ADDR_BANK_SEL1:
+	case MAPPER71_ADDR_BANK_SEL2:
+	case MAPPER71_ADDR_BANK_SEL3:
+		m71_data->prg_bank = (data & 0xf) % max_prg_rom_bank_offset;
+		mapper71_update_prg_bank(nes);
+		break;
+	}
+	return (data_change) ? true : false;
+}
+
+// ------------------------------------------------------------
 // mapper 180 functions
 bool mapper180_write(nessys_t* nes, uint16_t addr, uint8_t data)
 {
@@ -1552,6 +1617,11 @@ bool nessys_init_mapper(nessys_t* nes)
 		nes->mapper_data = malloc(sizeof(mapper69_data));
 		memset(nes->mapper_data, 0, sizeof(mapper69_data));
 		mapper69_reset(nes);
+		break;
+	case 71:
+		nes->mapper_write = mapper71_write;
+		nes->mapper_data = malloc(sizeof(mapper71_data));
+		memset(nes->mapper_data, 0, sizeof(mapper71_data));
 		break;
 	case 180:
 		nes->mapper_write = mapper180_write;
