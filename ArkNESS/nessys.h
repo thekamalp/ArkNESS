@@ -398,7 +398,8 @@ struct nessys_t {
 	uint32_t cpu_cycle_inc;
 	uint8_t in_nmi;
 	uint8_t mapper_flags;
-	uint8_t pad0[2];
+	uint8_t iflag_delay;  // if set, the polarity of iflag is reversed for 1 instruction
+	uint8_t pad0[1];
 	nessys_cpu_regs_t reg;
 	nessys_apu_regs_t apu;
 	nessys_ppu_t ppu;
