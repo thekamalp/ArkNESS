@@ -772,20 +772,6 @@ void K3CALLBACK nessys_display(void* ptr)
 	float palette[4 * NESSYS_PPU_PAL_SIZE ];
 	//uint8_t buffer[8 * 1024];
 	uint32_t cycles;
-	nesssys_set_scanline(nes, -22);
-	//printf("cycles remaining: %d\n", nes->cycles_remaining);
-	uint32_t cycle_dec = nes->apu.sample_frac_generated / NESSYS_SND_SAMPLES_FRAC_PER_CYCLE;
-	nes->cycle -= cycle_dec;
-	nes->apu.sample_frac_generated -= cycle_dec * NESSYS_SND_SAMPLES_FRAC_PER_CYCLE;
-	nes->sbuf_frame_start = nes->sbuf_offset;
-	nes->vblank_cycles = NESSYS_PPU_SCANLINES_POST_RENDER_CLKS + nes->cycles_remaining;
-	nes->vblank_clear_cycles = nes->vblank_cycles + NESSYS_PPU_SCANLINES_VBLANK_CLKS + 1;
-	// 1 post render line + 20 vblank lines
-	cycles = nessys_exec_cpu_cycles(nes, NESSYS_PPU_SCANLINES_VBLANK_CLKS + NESSYS_PPU_SCANLINES_POST_RENDER_CLKS);
-	uint32_t skip_cycle = ((nes->frame & 1) && (nes->ppu.reg[1] & 0x18)) ? 1 : 0;
-	// pre-render line
-	cycles = nessys_exec_cpu_cycles(nes, NESSYS_PPU_SCANLINES_PRE_RENDER_CLKS - skip_cycle);
-	nes->scanline_cycle += skip_cycle;
 
 	// render image
 	k3renderTargets rt = { NULL };
@@ -1168,6 +1154,21 @@ void K3CALLBACK nessys_display(void* ptr)
 	} while ((nes->cycles_remaining > 20) || (nes->scroll_x_scanline > 0));
 
 	nessys_scale_to_back_buffer(nes);
+
+	nesssys_set_scanline(nes, -22);
+	//printf("cycles remaining: %d\n", nes->cycles_remaining);
+	uint32_t cycle_dec = nes->apu.sample_frac_generated / NESSYS_SND_SAMPLES_FRAC_PER_CYCLE;
+	nes->cycle -= cycle_dec;
+	nes->apu.sample_frac_generated -= cycle_dec * NESSYS_SND_SAMPLES_FRAC_PER_CYCLE;
+	nes->sbuf_frame_start = nes->sbuf_offset;
+	nes->vblank_cycles = NESSYS_PPU_SCANLINES_POST_RENDER_CLKS + nes->cycles_remaining;
+	nes->vblank_clear_cycles = nes->vblank_cycles + NESSYS_PPU_SCANLINES_VBLANK_CLKS + 1;
+	// 1 post render line + 20 vblank lines
+	cycles = nessys_exec_cpu_cycles(nes, NESSYS_PPU_SCANLINES_VBLANK_CLKS + NESSYS_PPU_SCANLINES_POST_RENDER_CLKS);
+	uint32_t skip_cycle = ((nes->frame & 1) && (nes->ppu.reg[1] & 0x18)) ? 1 : 0;
+	// pre-render line
+	cycles = nessys_exec_cpu_cycles(nes, NESSYS_PPU_SCANLINES_PRE_RENDER_CLKS - skip_cycle);
+	nes->scanline_cycle += skip_cycle;
 
 	nessys_gen_sound(nes);
 	nes->win->SwapBuffer();
