@@ -351,11 +351,7 @@ void mapper4_update_memmap(nessys_t* nes)
 void mapper4_eval_irq_timer(nessys_t* nes)
 {
 	mapper4_data* m4_data = (mapper4_data*)nes->mapper_data;
-	nes->mapper_irq_cycles |= (m4_data->irq_enable && m4_data->irq_counter == 0) ? 1 : 0;
-//	if (m4_data->irq_enable == 0) nes->mapper_irq_cycles = 0;
-//	else if (m4_data->irq_counter == 0) nes->mapper_irq_cycles = 1;
-//	else if (nes->scanline < 0 || nes->scanline + m4_data->irq_counter >= 240) nes->mapper_irq_cycles = 0;
-//	else nes->mapper_irq_cycles = NESSYS_PPU_CLK_PER_SCANLINE * m4_data->irq_counter - nes->scanline_cycle;
+	nes->mapper_irq |= (m4_data->irq_enable && m4_data->irq_counter == 0) ? true : false;
 }
 
 bool mapper4_write(nessys_t* nes, uint16_t addr, uint8_t data)
@@ -412,7 +408,7 @@ bool mapper4_write(nessys_t* nes, uint16_t addr, uint8_t data)
 		break;
 	case MAPPER4_ADDR_IRQ_DISABLE:
 		m4_data->irq_enable = 0;
-		nes->mapper_irq_cycles = 0;
+		nes->mapper_irq = false;
 		//mapper4_eval_irq_timer(nes);
 		break;
 	case MAPPER4_ADDR_IRQ_ENABLE:
@@ -1055,7 +1051,7 @@ bool mapper5_write(nessys_t* nes, uint16_t addr, uint8_t data)
 bool mapper5_update(nessys_t* nes)
 {
 	mapper5_data* m5_data = (mapper5_data*)nes->mapper_data;
-	nes->mapper_irq_cycles = 0;
+	nes->mapper_irq = false;
 	if (nes->scanline != m5_data->last_scanline) {
 		m5_data->mem[MAPPER5_ADDR_SCANLINE_IRQ_STATUS_OFFSET] = ((nes->scanline >= 0) << 6);
 		m5_data->mem[MAPPER5_ADDR_SCANLINE_IRQ_STATUS_OFFSET] |= 
@@ -1064,7 +1060,7 @@ bool mapper5_update(nessys_t* nes)
 				(nes->scanline >= m5_data->scanline_irq_cmp)) << 7;
 		m5_data->last_scanline = nes->scanline;
 	}
-	nes->mapper_irq_cycles |= ((m5_data->scanline_irq_status &
+	nes->mapper_irq |= ((m5_data->scanline_irq_status &
 		m5_data->mem[MAPPER5_ADDR_SCANLINE_IRQ_STATUS_OFFSET]) >> 7) & 0x1;
 	m5_data->mem[MAPPER5_ADDR_SCANLINE_IRQ_STATUS_OFFSET] &= ~(m5_data->scanline_irq_pend_clear);
 	m5_data->scanline_irq_pend_clear = 0x0;
@@ -1406,7 +1402,7 @@ bool mapper69_write(nessys_t* nes, uint16_t addr, uint8_t data)
 			mapper69_update_nametable(nes);
 			break;
 		case 13:
-			nes->mapper_irq_cycles = 0;
+			nes->mapper_irq = false;
 			m69_data->flags &= ~(MAPPER69_FLAGS_IRQ_COUNTER_ENABLE | MAPPER69_FLAGS_IRQ_ENABLE);
 			m69_data->flags |= data & (MAPPER69_FLAGS_IRQ_COUNTER_ENABLE | MAPPER69_FLAGS_IRQ_ENABLE);
 			break;
@@ -1429,7 +1425,7 @@ bool mapper69_update(nessys_t* nes)
 	mapper69_data* m69_data = (mapper69_data*)nes->mapper_data;
 	if (m69_data->flags & MAPPER69_FLAGS_IRQ_COUNTER_ENABLE) {
 		if (m69_data->irq_counter < nes->cpu_cycle_inc && (m69_data->flags & MAPPER69_FLAGS_IRQ_ENABLE)) {
-			nes->mapper_irq_cycles = 1;
+			nes->mapper_irq = true;
 		}
 		m69_data->irq_counter -= nes->cpu_cycle_inc;
 	}

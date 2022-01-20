@@ -337,6 +337,16 @@ struct nessys_cpu_backtrace_t {
 	int32_t scanline;
 	int32_t scanline_cycle;
 	nessys_cpu_regs_t reg;
+	uint32_t sprite0_hit_cycles;
+};
+
+const uint32_t NESSYS_STACK_TRACE_ENTRIES = 128;
+struct nessys_stack_trace_entry_t {
+	int32_t scanline;
+	int32_t scanline_cycle;
+	uint32_t frame;
+	uint16_t jump_addr;
+	uint16_t return_addr;
 };
 
 struct nessys_cbuffer_t {
@@ -384,12 +394,15 @@ struct nessys_t {
 	bool (*mapper_update)(nessys_t* nes);
 	void* mapper_data;
 	uint32_t cycle;
+	uint32_t frame;
 	int32_t cycles_remaining;
 	uint32_t vblank_cycles; // cycles until next vblank
+	uint32_t vblank_clear_cycles; // cycles until vblank is cleared
 	uint32_t sprite0_hit_cycles;  // cycles until sprite0 hit flag is set
-	uint32_t mapper_irq_cycles;   // cycles until mapper (external) irq signal is set; if 0, no irq pending
-	uint32_t frame_irq_cycles;    // cycles until a frame irq signal is set; if 0, no irq pending
-	uint32_t dmc_irq_cycles;      // cycles until a dmc irq signal is set; if 0, no irq pending
+	bool vblank_irq;
+	bool mapper_irq;
+	bool frame_irq;
+	bool dmc_irq;
 	uint32_t dmc_bits_to_play;
 	uint32_t dmc_bit_timer;
 	uint32_t dmc_buffer_full;
@@ -422,7 +435,11 @@ struct nessys_t {
 	uint8_t mid_scan_ntb_bank_change_position[NESSYS_MAX_MID_SCAN_NTB_BANK_CHANGES];
 	uint8_t* mid_scan_ntb_banks[NESSYS_MAX_MID_SCAN_NTB_BANK_CHANGES * 4];
 	uint32_t backtrace_entry;
+	uint32_t stack_trace_entry;
+	uint32_t irq_trace_entry;
 	nessys_cpu_backtrace_t backtrace[NESSYS_NUM_CPU_BACKTRACE_ENTRIES];
+	nessys_stack_trace_entry_t stack_trace[NESSYS_STACK_TRACE_ENTRIES];
+	nessys_stack_trace_entry_t irq_trace[NESSYS_STACK_TRACE_ENTRIES];
 	// rendering data structures
 	static const uint32_t NUM_GPU_VERSIONS = 2;
 	static const uint32_t NUM_CPU_VERSIONS = 16;
