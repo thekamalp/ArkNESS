@@ -662,20 +662,35 @@ void nessys_gen_sound(nessys_t* nes)
 	}
 }
 
-void nessys_gen_scanline_sprite_map(nessys_ppu_t* ppu)
+void nessys_gen_scanline_sprite_map(nessys_t* nes)
 {
+	nessys_ppu_t* ppu = &(nes->ppu);
 	uint32_t sp, row_start, row_offset, row;
 	uint32_t sprite_height = (ppu->reg[0] & 0x20) ? 16 : 8;
 	memset(ppu->scanline_num_sprites, 0, NESSYS_PPU_SCANLINES_RENDERED);
+	nes->sprite_overflow_cycles = 0;
 	for (sp = 0; sp < NESSYS_PPU_SPRITE_SIZE * NESSYS_PPU_NUM_SPRITES; sp += NESSYS_PPU_SPRITE_SIZE) {
 		row_start = ppu->oam[sp + 0];
 		for (row_offset = 0; row_offset < sprite_height; row_offset++) {
 			row = row_start + row_offset;
-			if (ppu->scanline_num_sprites[row] < NESSYS_PPU_MAX_SPRITES_PER_SCALINE && row < NESSYS_PPU_SCANLINES_RENDERED) {
-				ppu->scanline_sprite_id[row][ppu->scanline_num_sprites[row]] = sp;
-				ppu->scanline_num_sprites[row]++;
+			if (row < NESSYS_PPU_SCANLINES_RENDERED) {
+				if (ppu->scanline_num_sprites[row] < NESSYS_PPU_MAX_SPRITES_PER_SCALINE) {
+					ppu->scanline_sprite_id[row][ppu->scanline_num_sprites[row]] = sp;
+					ppu->scanline_num_sprites[row]++;
+				} else {
+					int32_t overflow_scanline_cycle = 64 + 48 + sp / 2;
+					int32_t cycles_until_overflow = (row - nes->scanline) * NESSYS_PPU_CLK_PER_SCANLINE + overflow_scanline_cycle - nes->scanline_cycle;
+					if (cycles_until_overflow < 0) cycles_until_overflow = 1;
+					if (nes->sprite_overflow_cycles == 0 || (uint32_t)cycles_until_overflow < nes->sprite_overflow_cycles) {
+						nes->sprite_overflow_cycles = cycles_until_overflow;
+					}
+				}
 			}
 		}
+	}
+	if ((ppu->reg[1] & 0x18) == 0x0) {
+		// if rendering is disabled, then we don't set the sprite overflow bit
+		nes->sprite_overflow_cycles = 0;
 	}
 }
 
@@ -1144,7 +1159,7 @@ void K3CALLBACK nessys_display(void* ptr)
 			}
 
 			// need to only do this if sprtes have changed position
-			nessys_gen_scanline_sprite_map(&(nes->ppu));
+			nessys_gen_scanline_sprite_map(nes);
 
 			nes->mapper_cpu_setup(nes);
 			cycles = nessys_exec_cpu_cycles(nes, 0);
@@ -1629,6 +1644,11 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 			nes->ppu.status |= 0x40;
 			nes->ppu.reg[2] |= 0x40;
 			nes->sprite0_hit_cycles = 0;
+		}
+		if (nes->sprite_overflow_cycles == 1) {
+			nes->ppu.status |= 0x20;
+			nes->ppu.reg[2] |= 0x20;
+			nes->sprite_overflow_cycles = 0;
 		}
 
 		uint32_t instruction_cycles = (NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles));
@@ -2845,6 +2865,13 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				nes->sprite0_hit_cycles = 1;
 			} else {
 				nes->sprite0_hit_cycles -= NESSYS_PPU_PER_CPU_CLK * (nes->cpu_cycle_inc);
+			}
+		}
+		if (nes->sprite_overflow_cycles > 0) {
+			if (nes->sprite_overflow_cycles <= NESSYS_PPU_PER_CPU_CLK * (nes->cpu_cycle_inc)) {
+				nes->sprite_overflow_cycles = 1;
+			} else {
+				nes->sprite_overflow_cycles -= NESSYS_PPU_PER_CPU_CLK * (nes->cpu_cycle_inc);
 			}
 		}
 	}

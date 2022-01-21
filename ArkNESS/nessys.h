@@ -399,6 +399,7 @@ struct nessys_t {
 	uint32_t vblank_cycles; // cycles until next vblank
 	uint32_t vblank_clear_cycles; // cycles until vblank is cleared
 	uint32_t sprite0_hit_cycles;  // cycles until sprite0 hit flag is set
+	uint32_t sprite_overflow_cycles;  // cycles until sprite overflow is set
 	bool vblank_irq;
 	bool mapper_irq;
 	bool frame_irq;
