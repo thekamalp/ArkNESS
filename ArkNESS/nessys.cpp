@@ -2625,7 +2625,9 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				switch (offset) {
 				case 0x0:
 					// if we toggle vblank enable from 0 to 1 while in vblank, retrigger a vblank
-					if ((nes->ppu.reg[2] & 0x80) && (data_change & 0x80) && (nes->ppu.reg[0] & 0x80)) nes->vblank_irq = true;
+					if ((nes->ppu.reg[2] & 0x80) && (data_change & 0x80) && (nes->ppu.reg[0] & 0x80)) {
+						nes->vblank_cycles = NESSYS_PPU_PER_CPU_CLK * (op->num_cycles + penalty_cycles) + 1;
+					}
 					// we only re-render frame if bits that change rendering changes
 					ppu_ever_written = ppu_ever_written || (data_change & 0x29);
 					if ((data_change & 0x10) && (nes->ppu.reg[1] & 0x08)) {
