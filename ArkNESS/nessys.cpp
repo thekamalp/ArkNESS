@@ -2296,7 +2296,6 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					if (apu_write && offset >= NESSYS_APU_STATUS_OFFSET) {
 						switch (offset) {
 						case NESSYS_APU_STATUS_OFFSET:
-							clear_frame_irq = false;  // a write to this reg will not clear frame irq
 							nes->apu.status = nes->reg.a;
 							break;
 						case NESSYS_APU_JOYPAD0_OFFSET:
@@ -2322,7 +2321,6 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					if (apu_write && offset >= NESSYS_APU_STATUS_OFFSET) {
 						switch (offset) {
 						case NESSYS_APU_STATUS_OFFSET:
-							clear_frame_irq = false;  // a write to this reg will not clear frame irq
 							nes->apu.status = nes->reg.x;
 							break;
 						case NESSYS_APU_JOYPAD0_OFFSET:
@@ -2348,7 +2346,6 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					if (apu_write && offset >= NESSYS_APU_JOYPAD0_OFFSET) {
 						switch (offset) {
 						case NESSYS_APU_STATUS_OFFSET:
-							clear_frame_irq = false;  // a write to this reg will not clear frame irq
 							nes->apu.status = nes->reg.y;
 							break;
 						case NESSYS_APU_JOYPAD0_OFFSET:
