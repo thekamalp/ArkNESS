@@ -1521,12 +1521,14 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 	bool done = false;
 	bool ppu_ever_written = false;
 	const c6502_op_code_t* op = NULL;
+	const c6502_op_code_t* op_next = NULL;
 	uint16_t addr = nes->reg.pc, indirect_addr = 0x0;
 	uint8_t* operand = &nes->reg.a;
 	uint16_t bank, offset;
 	uint16_t result;
 	uint16_t mem_addr_mask;
 	uint8_t* pc_ptr = NULL;
+	uint8_t* pc_ptr_next = NULL;
 	uint16_t penalty_cycles;
 	uint8_t overflow;
 	bool vblank_interrupt_taken;
@@ -1537,9 +1539,11 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 	int32_t next_scanline_cycle = 0;
 	nes->ppu.reg[2] &= 0x1F;
 	nes->ppu.reg[2] |= nes->ppu.status;
+	pc_ptr_next = nessys_mem(nes, nes->reg.pc, &bank, &offset);
+	op_next = &C6502_OP_CODE[*pc_ptr_next];
 	while (!done) {
-		pc_ptr = nessys_mem(nes, nes->reg.pc, &bank, &offset);
-		op = &C6502_OP_CODE[*pc_ptr];
+		pc_ptr = pc_ptr_next;
+		op = op_next;
 		ppu_write = false;
 		data_change = 0x0;
 		apu_write = false;
@@ -2749,6 +2753,9 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 			nes->cpu_cycle_inc = op->num_cycles + penalty_cycles;
 		}
 
+		pc_ptr_next = nessys_mem(nes, nes->reg.pc, &bank, &offset);
+		op_next = &C6502_OP_CODE[*pc_ptr_next];
+
 		while (nes->dmc_bit_timer < (nes->cpu_cycle_inc)) {
 			if (nes->dmc_bits_to_play == 8 && (nes->apu.dmc.flags & NESSYS_APU_DMC_FLAG_LOOP)) {
 				nes->dmc_bits_to_play += ((uint32_t)nes->apu.dmc.length << 3);
@@ -2825,7 +2832,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 		}
 		nes->scanline_cycle = next_scanline_cycle;
 		ppu_ever_written |= nes->mapper_update(nes);
-		if (nes->scanline_cycle >= (int32_t)331) {
+		if ((nes->scanline_cycle + (NESSYS_PPU_PER_CPU_CLK * op_next->num_cycles)) >= (int32_t)NESSYS_PPU_CLK_PER_SCANLINE) {
 			nes->scanline_cycle -= NESSYS_PPU_CLK_PER_SCANLINE;
 
 			nes->scanline++;
