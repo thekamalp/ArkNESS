@@ -435,6 +435,7 @@ struct nessys_t {
 	uint32_t prev_last_num_mid_scan_ntb_bank_changes;
 	uint8_t mid_scan_ntb_bank_change_position[NESSYS_MAX_MID_SCAN_NTB_BANK_CHANGES];
 	uint8_t* mid_scan_ntb_banks[NESSYS_MAX_MID_SCAN_NTB_BANK_CHANGES * 4];
+	int32_t frame_wait_time;
 	uint32_t backtrace_entry;
 	uint32_t stack_trace_entry;
 	uint32_t irq_trace_entry;

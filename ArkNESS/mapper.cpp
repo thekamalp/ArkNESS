@@ -200,6 +200,10 @@ bool mapper1_write(nessys_t* nes, uint16_t addr, uint8_t data)
 	if (max_chr_rom_bank_offset == 0) max_chr_rom_bank_offset = (nes->ppu.chr_ram_size >> MAPPER1_CHR_BANK_SIZE_LOG2) + ((nes->ppu.chr_ram_size & MAPPER1_CHR_BANK_MASK) ? 1 : 0);
 	uint8_t data_changed = 0x0;
 	mapper1_data* m1_data = (mapper1_data*)nes->mapper_data;
+
+	// this is not write that affects the shift register
+	if (addr < 0x8000) return false;
+
 	if (data & 0x80) {
 		m1_data->shift_reg = MAPPER1_SHIFT_REG_RESET;
 	} else {

@@ -770,6 +770,23 @@ void K3CALLBACK nessys_display(void* ptr)
 {
 	nessys_t* nes = (nessys_t*)ptr;
 
+	// Decrement wait time each time we enter this function
+	// if we have more time to wait, then exit out
+	uint32_t delta_time = nes->timer->GetDeltaTime();
+	delta_time = (delta_time > 100) ? 100 : delta_time;  // First call may have a large number, so cap it
+	nes->frame_wait_time -= delta_time;
+	if (nes->frame_wait_time > 0) {
+		nes->timer->Sleep(nes->frame_wait_time);
+		return;
+	}
+
+	// if we are done waiting, then execute/render the frame
+	// and increment wait time by 1/60 of second,
+	// this works out to 16.6667 ms.  Since we have to enter wait time in integer
+	// values, add 16 ms every 3rd frame, and 17 ms on all other frames
+	int32_t wait_time = 16 + (nes->frame % 3 != 0);
+	nes->frame_wait_time += wait_time;
+
 	if (nes->menu.pane == nesmenu_pane_t::NONE &&
 		(((nes->apu.joypad[0] & NESSYS_STD_CONTROLLER_BUTTON_START_MASK) && 
 			(nes->apu.joypad[0] & NESSYS_STD_CONTROLLER_BUTTON_SELECT_MASK)) ||
@@ -1188,6 +1205,7 @@ void K3CALLBACK nessys_display(void* ptr)
 	nessys_gen_sound(nes);
 	nes->win->SwapBuffer();
 	nes->frame++;
+
 }
 
 uint8_t nessys_masked_joypad(uint8_t joypad)
