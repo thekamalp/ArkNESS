@@ -821,6 +821,7 @@ void K3CALLBACK nessys_display(void* ptr)
 	nessys_cbuffer_t* cb_data;
 	k3rect scissor;
 	int i, c, index;
+	nessys_ppu_t* cur_ppu;
 	do {
 		while (nes->scanline_cycle > (int32_t)NESSYS_PPU_CLK_PER_SCANLINE) {
 			nes->scanline_cycle -= (int32_t)NESSYS_PPU_CLK_PER_SCANLINE;
@@ -846,6 +847,7 @@ void K3CALLBACK nessys_display(void* ptr)
 		}
 		cb_data = static_cast<nessys_cbuffer_t*>(nes->cb_upload[nes->cb_main_cpu_version]->MapForWrite(sizeof(nessys_cbuffer_exp_t)));
 		if (nes->scroll_x_scanline <= 0) {
+			cur_ppu = &nes->ppu;
 			if (nes->ppu.scroll_y_changed) {
 				uint16_t old_scroll_y = nes->ppu.scroll_y;
 				nes->ppu.scroll_y -= nes->scanline;
@@ -874,6 +876,7 @@ void K3CALLBACK nessys_display(void* ptr)
 		} else {
 			uint32_t prev_cb_main_version = (nes->cb_main_cpu_version == 0) ? nessys_t::NUM_CPU_VERSIONS - 1 : nes->cb_main_cpu_version - 1;
 			nessys_cbuffer_t* cb_src_data = static_cast<nessys_cbuffer_t*>(nes->cb_upload[prev_cb_main_version]->MapForWrite(sizeof(nessys_cbuffer_exp_t)));
+			cur_ppu = (nessys_ppu_t*)cb_src_data;
 			memcpy(cb_data, cb_src_data, sizeof(nessys_cbuffer_t));
 			nes->cb_upload[prev_cb_main_version]->Unmap();
 			memcpy(cb_data->scroll_x, nes->ppu.scroll_x, 240);
@@ -901,11 +904,11 @@ void K3CALLBACK nessys_display(void* ptr)
 		nes->cmd_buf->SetVertexBuffer(0, nes->vb_fullscreen);
 		nes->cmd_buf->Draw(4);
 
-		if (nes->ppu.reg[0x1] & 0x08) {
+		if (cur_ppu->reg[0x1] & 0x08) {
 			uint32_t mapper_setup = NESSYS_MAPPER_SETUP_DRAW_INCOMPLETE;
 			uint32_t phase = 0;
 			while (mapper_setup & NESSYS_MAPPER_SETUP_DRAW_INCOMPLETE) {
-				nes->scissor_left_x = 8 - ((nes->ppu.reg[1] << 2) & 0x8);
+				nes->scissor_left_x = 8 - ((cur_ppu->reg[1] << 2) & 0x8);
 				nes->scissor_top_y = (nes->scroll_x_scanline > 0) ? nes->scroll_x_scanline : nes->scanline;
 				nes->scissor_right_x = 256;
 				nes->scissor_bottom_y = 240;
@@ -924,8 +927,8 @@ void K3CALLBACK nessys_display(void* ptr)
 						scan_right = nes->mid_scan_ntb_bank_change_position[m];
 						scan_right |= (scan_right == 0) << 8;  // make 0 into 256
 						cb_data = static_cast<nessys_cbuffer_t*>(nes->cb_upload[nes->cb_main_cpu_version]->MapForWrite(sizeof(nessys_cbuffer_exp_t)));
-						memcpy(cb_data->ppu, nes->ppu.reg, 4 * sizeof(uint32_t) + 240);
-						memcpy(cb_data->sprite, nes->ppu.oam, 4 * 16 * sizeof(uint32_t));
+						memcpy(cb_data->ppu, cur_ppu->reg, 4 * sizeof(uint32_t) + 240);
+						memcpy(cb_data->sprite, cur_ppu->oam, 4 * 16 * sizeof(uint32_t));
 						index = NESSYS_CHR_ROM_WIN_MIN;
 						for (i = 0; i < 8; i++) {
 							memcpy(cb_data->pattern + (i << 8), nes->mid_scan_ntb_banks[4 * m + (i & 0x3)], 1024);
@@ -985,11 +988,11 @@ void K3CALLBACK nessys_display(void* ptr)
 			}
 		}
 
-		if (nes->ppu.reg[0x1] & 0x10) {
+		if (cur_ppu->reg[0x1] & 0x10) {
 			uint32_t mapper_setup = NESSYS_MAPPER_SETUP_DRAW_INCOMPLETE;
 			uint32_t phase = 0;
 			while (mapper_setup & NESSYS_MAPPER_SETUP_DRAW_INCOMPLETE) {
-				nes->scissor_left_x = 8 - ((nes->ppu.reg[1] << 1) & 0x8);
+				nes->scissor_left_x = 8 - ((cur_ppu->reg[1] << 1) & 0x8);
 				nes->scissor_top_y = (nes->scroll_x_scanline > 0) ? nes->scroll_x_scanline : nes->scanline;
 				nes->scissor_right_x = 256;
 				nes->scissor_bottom_y = 240;
@@ -2639,7 +2642,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 			}
 			if (ppu_write) {
 				bool custom_bg_setup = (nes->mapper_bg_setup_type & NESSYS_MAPPER_SETUP_CUSTOM) ? true : false;
-				int32_t scroll_start = (nes->scanline < 0) ? 0 : nes->scanline;// +1;
+				int32_t scroll_start = (nes->scanline < 0) ? 0 : nes->scanline+1;
 				bool scroll_x_changed = false;
 				if (bank == NESSYS_PPU_REG_START_BANK) {
 					nes->ppu.reg[2] = (nes->ppu.status & 0xE0) | (nes->ppu.reg[offset & 0x7] & 0x1F);
@@ -2676,7 +2679,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					nes->ppu.reg[3]++;
 					break;
 				case 0x5:
-					scroll_x_changed = (nes->ppu.scroll_x[scroll_start] != nes->ppu.reg[5]);
+					scroll_x_changed = (nes->ppu.reg[1] & 0x08) && (nes->ppu.scroll_x[scroll_start] != nes->ppu.reg[5]);
 					// only update if the scroll value actually changed, and only in x direction (y updates at next frame)
 					ppu_ever_written = ppu_ever_written || ((nes->ppu.addr_toggle == 0) && scroll_x_changed && (custom_bg_setup || (nes->num_mid_scan_ntb_bank_changes != 0)));
 					// update the vram address as well

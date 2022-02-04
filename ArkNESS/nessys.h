@@ -304,7 +304,6 @@ struct nessys_apu_regs_t {
 };
 
 struct nessys_ppu_t {
-	uint32_t cycle;
 	uint8_t reg[NESSYS_PPU_REG_SIZE];
 	uint8_t status;
 	uint8_t max_y;
