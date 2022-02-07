@@ -16,12 +16,32 @@ void nesmenu_init(nessys_t* nes)
 	nes->menu.cur_list_size = 0;
 	nes->menu.cur_list_alloc_size = 0;
 	nes->menu.message_box = "";
+	nes->menu.sprite_line_limit = 1;  // smart check by default
 	char* home_dir = NULL;
 #ifdef _WIN32
 	size_t str_size;
 	_dupenv_s(&home_dir, &str_size, "USERPROFILE");
 #endif
-	if(home_dir) nes->menu.cur_dir = std::string(home_dir);
+	if (home_dir) {
+		nes->menu.opt_file = std::string(home_dir);
+		nes->menu.cur_dir = std::string(home_dir);
+		nes->menu.opt_file += NESMENU_DIR_SEPARATOR;
+		nes->menu.opt_file += ".arkness";
+		const std::filesystem::path opt_path = nes->menu.opt_file;
+		if (!std::filesystem::exists(opt_path)) {
+			std::filesystem::create_directory(opt_path);
+		}
+		nes->menu.opt_file += NESMENU_DIR_SEPARATOR;
+		nes->menu.opt_file += "options.txt";
+		nesmenu_load_options(nes);
+	} else {
+		nes->menu.opt_file = "";  // can't save options - no home directory found
+#ifdef _WIN32
+		nes->menu.cur_dir = "C:\\";
+#else
+		nes->menu.cur_dir = "/";
+#endif
+	}
 #ifdef _WIN32
 	free(home_dir);
 #endif
@@ -51,12 +71,26 @@ void nesmenu_update_list(nessys_t* nes)
 		nesmenu_resize_list(&(nes->menu));
 		break;
 	case nesmenu_pane_t::MAIN:
-		nes->menu.cur_list_size = 3;
+		nes->menu.cur_list_size = nesmenu_main_items;
 		nesmenu_resize_list(&(nes->menu));
 		for (index = 0; index < nesmenu_main_items; index++) {
 			nes->menu.cur_list[index].item = nesmenu_main[index];
 			nes->menu.cur_list[index].flag = NESMENU_ITEM_FLAG_NONE;
 		}
+		break;
+	case nesmenu_pane_t::OPTIONS:
+		nes->menu.cur_list_size = nesmenu_options_items;
+		nesmenu_resize_list(&(nes->menu));
+		for (index = 0; index < nesmenu_options_items; index++) {
+			nes->menu.cur_list[index].item = nesmenu_options[index];
+			nes->menu.cur_list[index].flag = NESMENU_ITEM_FLAG_NONE;
+		}
+		switch (nes->menu.sprite_line_limit) {
+		case 0: nes->menu.cur_list[nesmenu_options_item_sprite_line_limit].item += "Off"; break;
+		case 1: nes->menu.cur_list[nesmenu_options_item_sprite_line_limit].item += "Smart"; break;
+		case 2: nes->menu.cur_list[nesmenu_options_item_sprite_line_limit].item += "On"; break;
+		}
+		nes->menu.cur_list[nesmenu_options_item_vsync].item += (nes->win->GetVsyncInterval()) ? "On" : "Off";
 		break;
 	case nesmenu_pane_t::OPEN:
 		index = 0;
@@ -97,14 +131,13 @@ void nesmenu_display(nessys_t* nes)
 	float fg_color[] = { 1.0f, 1.0f, 1.0f, 1.0f };
 	float sel_color[] = { 1.0f, 0.0f, 0.0f, 1.0f };
 	float bg_color[] = { 0.0f, 0.0f, 0.0f, 0.0f };
-	uint32_t font_height = 48;
 	uint32_t i, row;
 	k3renderTargets rt = { NULL };
 	uint32_t cur_menu_items = nes->menu.cur_list_size;
 	nes->sb_main->StopSBuffer();
 	std::string pane_title = "ArkNESS";
 
-	uint32_t displayable_menu_items = (nes->win->GetHeight() / font_height) - 1;
+	uint32_t displayable_menu_items = (nes->win->GetHeight() / NESMENU_FONT_HEIGHT) - 1;
 	if (displayable_menu_items > 30) displayable_menu_items = 30;
 
 	if (nes->menu.last_joypad_state[0] != nes->apu.joypad[0]) {
@@ -141,9 +174,27 @@ void nesmenu_display(nessys_t* nes)
 						nes->menu.pane = nesmenu_pane_t::OPEN;
 						nesmenu_update_list(nes);
 						break;
+					case nesmenu_main_item_options:
+						nes->menu.pane = nesmenu_pane_t::OPTIONS;
+						nesmenu_update_list(nes);
+						break;
 					case nesmenu_main_item_exit:
 						k3winObj::ExitLoop();
 						return;
+					}
+					break;
+				case nesmenu_pane_t::OPTIONS:
+					switch (nes->menu.select) {
+					case nesmenu_options_item_sprite_line_limit:
+						nes->menu.sprite_line_limit++;
+						if (nes->menu.sprite_line_limit > 2) nes->menu.sprite_line_limit = 0;
+						nesmenu_update_list(nes);
+						nes->menu.select = nesmenu_options_item_sprite_line_limit;
+						break;
+					case nesmenu_options_item_vsync:
+						nes->win->SetVsyncInterval(!nes->win->GetVsyncInterval());
+						nesmenu_update_list(nes);
+						nes->menu.select = nesmenu_options_item_vsync;
 					}
 					break;
 				case nesmenu_pane_t::OPEN:
@@ -229,14 +280,14 @@ void nesmenu_display(nessys_t* nes)
 	nes->cmd_buf->DrawText(pane_title.c_str(), nes->main_font, fg_color, bg_color, 0, 0, k3fontAlignment::TOP_CENTER);
 	for (i = nes->menu.list_start, row = 0; i < displayable_menu_items; i++, row++) {
 		float* color = (nes->menu.select == i) ? sel_color : fg_color;
-		nes->cmd_buf->DrawText(nes->menu.cur_list[i].item.c_str(), nes->main_font, color, bg_color, 0, (row + 1) * font_height, k3fontAlignment::TOP_LEFT);
+		nes->cmd_buf->DrawText(nes->menu.cur_list[i].item.c_str(), nes->main_font, color, bg_color, 0, (row + 1) * NESMENU_FONT_HEIGHT, k3fontAlignment::TOP_LEFT);
 	}
 	if (nes->menu.message_box != "") {
 		uint32_t win_width = nes->win->GetWidth();
 		uint32_t win_height = nes->win->GetHeight();
 		k3rect rect;
 		rect.width = 500;
-		rect.height = 2 * font_height;
+		rect.height = 2 * NESMENU_FONT_HEIGHT;
 		rect.x = (rect.width > win_width) ? 0 : (win_width - rect.width) / 2;
 		rect.y = (rect.height > win_height) ? 0 : (win_height - rect.height) / 2;
 		nessys_cbuffer_t* cb_data = static_cast<nessys_cbuffer_t*>(nes->cb_upload[nes->cb_main_cpu_version]->MapForWrite(sizeof(nessys_cbuffer_exp_t)));
@@ -265,6 +316,48 @@ void nesmenu_display(nessys_t* nes)
 	nes->gfx->SubmitCmdBuf(nes->cmd_buf);
 	nes->menu.fence_val = nes->fence->SetGpuFence(k3gpuQueue::GRAPHICS);
 	nes->win->SwapBuffer();
+}
+
+void nesmenu_load_options(nessys_t* nes)
+{
+	if (nes->menu.opt_file != "") {
+		FILE* opt_fh = NULL;
+		char buffer[256];
+		fopen_s(&opt_fh, nes->menu.opt_file.c_str(), "r");
+		if (opt_fh) {
+			while (fgets(buffer, 256, opt_fh) != NULL) {
+				if (!strncmp(buffer, "[CUR_DIR]\n", 256)) {
+					fgets(buffer, 256, opt_fh);
+					size_t len = strlen(buffer);
+					if (len > 1) buffer[len - 1] = '\0';
+					nes->menu.cur_dir = buffer;
+				} else if (!strncmp(buffer, "[VSYNC]\n", 256)) {
+					fgets(buffer, 256, opt_fh);
+					uint32_t vsync = (buffer[0] == '0' || buffer[0] == '\n') ? 0 : 1;
+					nes->win->SetVsyncInterval(vsync);
+				} else if (!strncmp(buffer, "[SPRITE_LINE_LIMIT]\n", 256)) {
+					fgets(buffer, 256, opt_fh);
+					nes->menu.sprite_line_limit = (buffer[0] == '0') ? 0 : ((buffer[0] == '1') ? 1 : 2);
+				}
+			}
+			fclose(opt_fh);
+		}
+	}
+}
+
+void nesmenu_save_options(nessys_t* nes)
+{
+	if (nes->menu.opt_file != "") {
+		FILE* opt_fh = NULL;
+		fopen_s(&opt_fh, nes->menu.opt_file.c_str(), "w");
+		if (opt_fh) {
+			fprintf(opt_fh, "[CUR_DIR]\n%s\n\n", nes->menu.cur_dir.c_str());
+			fprintf(opt_fh, "[VSYNC]\n%d\n\n", (nes->win->GetVsyncInterval() != 0) ? 1 : 0);
+			fprintf(opt_fh, "# Sprite line limit values: 0 - off, 1 - smart limit, 2 - on (true nes emulation)\n");
+			fprintf(opt_fh, "[SPRITE_LINE_LIMIT]\n%d\n\n", nes->menu.sprite_line_limit);
+			fclose(opt_fh);
+		}
+	}
 }
 
 void nesmenu_cleanup(nessys_t* nes)

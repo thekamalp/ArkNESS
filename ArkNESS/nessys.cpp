@@ -285,7 +285,7 @@ void nessys_init(nessys_t* nes)
 	k3fontDesc fdesc = { 0 };
 	fdesc.view_index = vdesc.view_index;
 	fdesc.name = "..\\assets\\LapsusPro-Bold.otf";
-	fdesc.point_size = 48.0f;
+	fdesc.point_size = NESMENU_FONT_HEIGHT;
 	fdesc.style = k3fontStyle::NORMAL;
 	fdesc.weight = k3fontWeight::NORMAL;
 	fdesc.format = k3fmt::RGBA8_UNORM;
@@ -697,6 +697,13 @@ void nessys_gen_scanline_sprite_map(nessys_t* nes)
 bool nessys_sprite_max_check(nessys_t* nes)
 {
 	// returns true if we can use unlimited sprites per scanline
+	if (nes->menu.sprite_line_limit != 1) {
+		// 0 means no limits, 2 means limit to 8 always (true emulation mode)
+		// 1 is smart check, which sees if the applicaitonreally intended to mask off
+		// sprites based on the 8 sprite limit
+		return (nes->menu.sprite_line_limit == 0) ? true : false;
+	}
+
 	uint8_t i;
 	uint32_t index;
 	bool use_sprite_max = true;

@@ -24,6 +24,7 @@ int main()
 	nessys_init(&nes_inst);
 	k3winObj::WindowLoop();
 	nessys_unload_cart(&nes_inst);
+	nesmenu_save_options(&nes_inst);
 	nessys_cleanup(&nes_inst);
 
 	return 0;
