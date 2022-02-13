@@ -90,6 +90,10 @@ void nesmenu_update_list(nessys_t* nes)
 		case 1: nes->menu.cur_list[nesmenu_options_item_sprite_line_limit].item += "Smart"; break;
 		case 2: nes->menu.cur_list[nesmenu_options_item_sprite_line_limit].item += "On"; break;
 		}
+		switch (nes->menu.upscale_type) {
+		case 0: nes->menu.cur_list[nesmenu_options_item_upscale_type].item += "Copy"; break;
+		case 1: nes->menu.cur_list[nesmenu_options_item_upscale_type].item += "xBR"; break;
+		}
 		nes->menu.cur_list[nesmenu_options_item_vsync].item += (nes->win->GetVsyncInterval()) ? "On" : "Off";
 		break;
 	case nesmenu_pane_t::OPEN:
@@ -191,10 +195,17 @@ void nesmenu_display(nessys_t* nes)
 						nesmenu_update_list(nes);
 						nes->menu.select = nesmenu_options_item_sprite_line_limit;
 						break;
+					case nesmenu_options_item_upscale_type:
+						nes->menu.upscale_type++;
+						if (nes->menu.upscale_type > 1) nes->menu.upscale_type = 0;
+						nesmenu_update_list(nes);
+						nes->menu.select = nesmenu_options_item_upscale_type;
+						break;
 					case nesmenu_options_item_vsync:
 						nes->win->SetVsyncInterval(!nes->win->GetVsyncInterval());
 						nesmenu_update_list(nes);
 						nes->menu.select = nesmenu_options_item_vsync;
+						break;
 					}
 					break;
 				case nesmenu_pane_t::OPEN:
@@ -335,6 +346,9 @@ void nesmenu_load_options(nessys_t* nes)
 					fgets(buffer, 256, opt_fh);
 					uint32_t vsync = (buffer[0] == '0' || buffer[0] == '\n') ? 0 : 1;
 					nes->win->SetVsyncInterval(vsync);
+				} else if(!strncmp(buffer, "[UPSCALE_TYPE]\n", 256)) {
+					fgets(buffer, 256, opt_fh);
+					nes->menu.upscale_type = (buffer[0] == '0') ? 0 : 1;
 				} else if (!strncmp(buffer, "[SPRITE_LINE_LIMIT]\n", 256)) {
 					fgets(buffer, 256, opt_fh);
 					nes->menu.sprite_line_limit = (buffer[0] == '0') ? 0 : ((buffer[0] == '1') ? 1 : 2);
@@ -353,6 +367,8 @@ void nesmenu_save_options(nessys_t* nes)
 		if (opt_fh) {
 			fprintf(opt_fh, "[CUR_DIR]\n%s\n\n", nes->menu.cur_dir.c_str());
 			fprintf(opt_fh, "[VSYNC]\n%d\n\n", (nes->win->GetVsyncInterval() != 0) ? 1 : 0);
+			fprintf(opt_fh, "# Upscale values: 0 - Copy, 1 - xBR\n");
+			fprintf(opt_fh, "[UPSCALE_TYPE]\n%d\n\n", nes->menu.upscale_type);
 			fprintf(opt_fh, "# Sprite line limit values: 0 - off, 1 - smart limit, 2 - on (true nes emulation)\n");
 			fprintf(opt_fh, "[SPRITE_LINE_LIMIT]\n%d\n\n", nes->menu.sprite_line_limit);
 			fclose(opt_fh);

@@ -459,6 +459,7 @@ struct nessys_t {
 	k3gfxState st_exp_background;
 	k3gfxState st_m9_background;
 	k3gfxState st_copy;
+	k3gfxState st_xbr;
 	k3buffer vb_fullscreen;
 	k3buffer vb_sprite;
 	uint32_t cb_main_cpu_version;

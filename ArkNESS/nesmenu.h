@@ -49,6 +49,7 @@ struct nesmenu_data {
 	std::string message_box;
 	uint8_t last_joypad_state[2];
 	uint8_t sprite_line_limit;
+	uint8_t upscale_type;
 };
 
 const uint32_t nesmenu_main_items = 3;
@@ -57,10 +58,11 @@ const uint8_t nesmenu_main_item_options = 1;
 const uint8_t nesmenu_main_item_exit = 2;
 const char nesmenu_main[nesmenu_main_items][32] = { "Open", "Options", "Exit" };
 
-const uint32_t nesmenu_options_items = 2;
+const uint32_t nesmenu_options_items = 3;
 const uint8_t nesmenu_options_item_sprite_line_limit = 0;
-const uint8_t nesmenu_options_item_vsync = 1;
-const char nesmenu_options[nesmenu_options_items][32] = { "Sprite line limit: ", "VSync: " };
+const uint8_t nesmenu_options_item_upscale_type = 1;
+const uint8_t nesmenu_options_item_vsync = 2;
+const char nesmenu_options[nesmenu_options_items][32] = { "Sprite line limit: ", "Upscale type: ", "VSync: " };
 
 void nesmenu_init(nessys_t* nes);
 void nesmenu_update_list(nessys_t* nes);

@@ -79,5 +79,8 @@
     <FxCompile Include="m9_sprite_ps.hlsl">
       <Filter>Source Files</Filter>
     </FxCompile>
+    <FxCompile Include="xbr_ps.hlsl">
+      <Filter>Source Files</Filter>
+    </FxCompile>
   </ItemGroup>
 </Project>

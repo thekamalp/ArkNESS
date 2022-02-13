@@ -116,6 +116,7 @@ void nessys_init(nessys_t* nes)
 	k3shader exp_background_ps = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\exp_background_ps.cso");
 	k3shader m9_background_ps = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\m9_background_ps.cso");
 	k3shader copy_ps = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\copy_ps.cso");
+	k3shader xbr_ps = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\xbr_ps.cso");
 
 	// setup input format
 	k3inputElement in_elem[1];
@@ -184,6 +185,9 @@ void nessys_init(nessys_t* nes)
 	gfx_state_desc.depth_state = ds_none;
 	gfx_state_desc.rast_state.cull_mode = k3cull::BACK;
 	nes->st_copy = nes->gfx->CreateGfxState(&gfx_state_desc);
+
+	gfx_state_desc.pixel_shader = xbr_ps;
+	nes->st_xbr = nes->gfx->CreateGfxState(&gfx_state_desc);
 
 	// Create buffers
 	uint32_t i;
@@ -758,7 +762,10 @@ void nessys_scale_to_back_buffer(nessys_t* nes)
 	nes->cmd_buf->SetScissor(&scissor);
 	nes->cmd_buf->SetDrawPrim(k3drawPrimType::TRIANGLESTRIP);
 	nes->cmd_buf->TransitionResource(nes->surf_render->GetResource(), k3resourceState::SHADER_RESOURCE);
-	nes->cmd_buf->SetGfxState(nes->st_copy);
+	switch (nes->menu.upscale_type) {
+	case 1: nes->cmd_buf->SetGfxState(nes->st_xbr); break;
+	default: nes->cmd_buf->SetGfxState(nes->st_copy); break;
+	}
 	if (nes->menu.pane == nesmenu_pane_t::NONE) {
 		nes->cmd_buf->SetConstantBuffer(0, nes->cb_copy_normal);
 	} else {
