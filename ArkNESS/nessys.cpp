@@ -836,6 +836,7 @@ void K3CALLBACK nessys_display(void* ptr)
 	k3rect scissor;
 	int i, c, index;
 	nessys_ppu_t* cur_ppu;
+	memset(nes->ppu.scroll_x, nes->ppu.scroll[0], 240);
 	do {
 		while (nes->scanline_cycle > (int32_t)NESSYS_PPU_CLK_PER_SCANLINE) {
 			nes->scanline_cycle -= (int32_t)NESSYS_PPU_CLK_PER_SCANLINE;
