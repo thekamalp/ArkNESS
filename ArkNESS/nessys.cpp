@@ -106,17 +106,17 @@ void nessys_init(nessys_t* nes)
 	ds_sprite.front.pass_op = k3stencilOp::REPLACE;
 
 	// Load shaders
-	k3shader screen_vs = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\screen_vs.cso");
-	k3shader sprite_vs = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\sprite_vs.cso");
-	k3shader copy_vs = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\copy_vs.cso");
-	k3shader fill_ps = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\fill_ps.cso");
-	k3shader sprite_ps = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\sprite_ps.cso");
-	k3shader m9_sprite_ps = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\m9_sprite_ps.cso");
-	k3shader background_ps = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\background_ps.cso");
-	k3shader exp_background_ps = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\exp_background_ps.cso");
-	k3shader m9_background_ps = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\m9_background_ps.cso");
-	k3shader copy_ps = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\copy_ps.cso");
-	k3shader xbr_ps = nes->gfx->CreateShaderFromCompiledFile("..\\Debug\\xbr_ps.cso");
+	k3shader screen_vs = nes->gfx->CreateShaderFromCompiledFile(NES_SHADER_DIR"screen_vs.cso");
+	k3shader sprite_vs = nes->gfx->CreateShaderFromCompiledFile(NES_SHADER_DIR"sprite_vs.cso");
+	k3shader copy_vs = nes->gfx->CreateShaderFromCompiledFile(NES_SHADER_DIR"copy_vs.cso");
+	k3shader fill_ps = nes->gfx->CreateShaderFromCompiledFile(NES_SHADER_DIR"fill_ps.cso");
+	k3shader sprite_ps = nes->gfx->CreateShaderFromCompiledFile(NES_SHADER_DIR"sprite_ps.cso");
+	k3shader m9_sprite_ps = nes->gfx->CreateShaderFromCompiledFile(NES_SHADER_DIR"m9_sprite_ps.cso");
+	k3shader background_ps = nes->gfx->CreateShaderFromCompiledFile(NES_SHADER_DIR"background_ps.cso");
+	k3shader exp_background_ps = nes->gfx->CreateShaderFromCompiledFile(NES_SHADER_DIR"exp_background_ps.cso");
+	k3shader m9_background_ps = nes->gfx->CreateShaderFromCompiledFile(NES_SHADER_DIR"m9_background_ps.cso");
+	k3shader copy_ps = nes->gfx->CreateShaderFromCompiledFile(NES_SHADER_DIR"copy_ps.cso");
+	k3shader xbr_ps = nes->gfx->CreateShaderFromCompiledFile(NES_SHADER_DIR"xbr_ps.cso");
 
 	// setup input format
 	k3inputElement in_elem[1];
@@ -307,6 +307,20 @@ void nessys_init(nessys_t* nes)
 	nes->win->SetIdleFunc(nessys_display);
 }
 
+void nessys_apu_reset(nessys_t* nes)
+{
+	nes->apu.pulse[0].length = 0;
+	nes->apu.pulse[1].length = 0;
+	nes->apu.triangle.length = 0;
+	nes->apu.noise.length = 0;
+	nes->apu.noise.shift_reg = 0x01;
+	nes->apu.dmc.length = 0;
+	nes->apu.dmc.bytes_remaining = 0;
+	nes->apu.dmc.bits_remaining = 0;
+	nes->apu.dmc.flags = 0;
+	nes->sb_main->StopSBuffer();
+}
+
 void nessys_power_cycle(nessys_t* nes)
 {
 	nes->reg.p = 0x34;
@@ -321,8 +335,7 @@ void nessys_power_cycle(nessys_t* nes)
 	memset(nes->sysmem, 0, NESSYS_RAM_SIZE);
 	uint16_t bank, offset;
 	nes->reg.pc = *((uint16_t*)nessys_mem(nes, NESSYS_RST_VECTOR, &bank, &offset));
-	nes->apu.noise.shift_reg = 0x01;
-	nes->sb_main->StopSBuffer();
+	nessys_apu_reset(nes);
 }
 
 void nessys_reset(nessys_t* nes)
@@ -337,8 +350,7 @@ void nessys_reset(nessys_t* nes)
 	nes->ppu.reg[0x7] = 0x0;
 	uint16_t bank, offset;
 	nes->reg.pc = *((uint16_t*)nessys_mem(nes, NESSYS_RST_VECTOR, &bank, &offset));
-	nes->apu.noise.shift_reg = 0x01;
-	nes->sb_main->StopSBuffer();
+	nessys_apu_reset(nes);
 }
 
 bool nessys_load_cart_filename(nessys_t* nes, const char* filename)
@@ -793,6 +805,8 @@ void K3CALLBACK nessys_display(void* ptr)
 		nes->timer->Sleep(nes->frame_wait_time);
 		return;
 	}
+	// limit how far we can get behind
+	nes->frame_wait_time = (nes->frame_wait_time < -100) ? -100 : nes->frame_wait_time;
 
 	// if we are done waiting, then execute/render the frame
 	// and increment wait time by 1/60 of second,
@@ -1503,6 +1517,7 @@ void nessys_default_memmap(nessys_t* nes)
 	}
 }
 
+#ifdef _DEBUG
 void nessys_add_backtrace(nessys_t* nes)
 {
 	nessys_cpu_backtrace_t* bt = &(nes->backtrace[nes->backtrace_entry]);
@@ -1528,6 +1543,7 @@ void nessys_dump_backtrace(nessys_t* nes)
 		entry %= NESSYS_NUM_CPU_BACKTRACE_ENTRIES;
 	}
 }
+#endif
 
 bool nessys_add_mid_scan_bank_change(nessys_t* nes)
 {
@@ -1705,44 +1721,50 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				*(operand + nes->reg.s) = nes->reg.pc >> 8;        nes->reg.s--;
 				*(operand + nes->reg.s) = nes->reg.pc & 0xFF;      nes->reg.s--;
 				*(operand + nes->reg.s) = nes->reg.p & ~C6502_P_B; nes->reg.s--;
+#ifdef _DEBUG
 				nes->stack_trace[nes->stack_trace_entry].scanline = nes->scanline;
 				nes->stack_trace[nes->stack_trace_entry].scanline_cycle = nes->scanline_cycle;
 				nes->stack_trace[nes->stack_trace_entry].frame = nes->frame;
 				nes->stack_trace[nes->stack_trace_entry].return_addr = nes->reg.pc;
+#endif
 				nes->reg.pc = *((uint16_t*) nessys_mem(nes, NESSYS_NMI_VECTOR, &bank, &offset));
 				nes->reg.p |= C6502_P_I;
 				nes->in_nmi++;
 				nes->ppu.old_status  = (nes->ppu.status & 0xe0);
 				nes->ppu.old_status |= (nes->ppu.reg[2] & 0x1f);
+#ifdef _DEBUG
 				nes->stack_trace[nes->stack_trace_entry].jump_addr = nes->reg.pc;
 				nes->irq_trace[nes->irq_trace_entry] = nes->stack_trace[nes->stack_trace_entry];
 				nes->stack_trace_entry++;
 				if (nes->stack_trace_entry >= NESSYS_STACK_TRACE_ENTRIES) nes->stack_trace_entry = 0;
 				nes->irq_trace_entry++;
 				if (nes->irq_trace_entry >= NESSYS_STACK_TRACE_ENTRIES) nes->irq_trace_entry = 0;
-
+#endif
 				nes->cpu_cycle_inc = 7;
 			}
 		} else if( irq_interrupt) {
 			// mapper interrupt
 			// get the stack base
 			operand = nessys_mem(nes, 0x100, &bank, &offset);
+#ifdef _DEBUG
 			nes->stack_trace[nes->stack_trace_entry].scanline = nes->scanline;
 			nes->stack_trace[nes->stack_trace_entry].scanline_cycle = nes->scanline_cycle;
 			nes->stack_trace[nes->stack_trace_entry].frame = nes->frame;
 			nes->stack_trace[nes->stack_trace_entry].return_addr = nes->reg.pc;
+#endif
 			*(operand + nes->reg.s) = nes->reg.pc >> 8;        nes->reg.s--;
 			*(operand + nes->reg.s) = nes->reg.pc & 0xFF;      nes->reg.s--;
 			*(operand + nes->reg.s) = nes->reg.p & ~C6502_P_B; nes->reg.s--;
 			nes->reg.pc = *((uint16_t*)nessys_mem(nes, NESSYS_IRQ_VECTOR, &bank, &offset));
 			nes->reg.p |= C6502_P_I;
+#ifdef _DEBUG
 			nes->stack_trace[nes->stack_trace_entry].jump_addr = nes->reg.pc;
 			nes->irq_trace[nes->irq_trace_entry] = nes->stack_trace[nes->stack_trace_entry];
 			nes->stack_trace_entry++;
 			if (nes->stack_trace_entry >= NESSYS_STACK_TRACE_ENTRIES) nes->stack_trace_entry = 0;
 			nes->irq_trace_entry++;
 			if (nes->irq_trace_entry >= NESSYS_STACK_TRACE_ENTRIES) nes->irq_trace_entry = 0;
-
+#endif
 			nes->cpu_cycle_inc = 7;
 		} else {
 			skip_print = 1;
@@ -1757,8 +1779,10 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				else skip_print -= op->num_bytes;
 			}
 
+#ifdef _DEBUG
 			// add debug info
 			nessys_add_backtrace(nes);
+#endif
 
 			// move up the program counter
 			nes->reg.pc += op->num_bytes;
@@ -1940,20 +1964,24 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 			case C6502_INS_BRK:
 				// get the stack base
 				operand = nessys_mem(nes, 0x100, &bank, &offset);
+#ifdef _DEBUG
 				nes->stack_trace[nes->stack_trace_entry].scanline = nes->scanline;
 				nes->stack_trace[nes->stack_trace_entry].scanline_cycle = nes->scanline_cycle;
 				nes->stack_trace[nes->stack_trace_entry].frame = nes->frame;
 				nes->stack_trace[nes->stack_trace_entry].return_addr = nes->reg.pc;
+#endif
 				*(operand + nes->reg.s) = nes->reg.pc >> 8;   nes->reg.s--;
 				*(operand + nes->reg.s) = nes->reg.pc & 0xFF; nes->reg.s--;
 				*(operand + nes->reg.s) = nes->reg.p;         nes->reg.s--;
 				nes->reg.pc = *((uint16_t*) nessys_mem(nes, NESSYS_IRQ_VECTOR, &bank, &offset));
+#ifdef _DEBUF
 				nes->stack_trace[nes->stack_trace_entry].jump_addr = nes->reg.pc;
 				nes->irq_trace[nes->irq_trace_entry] = nes->stack_trace[nes->stack_trace_entry];
 				nes->stack_trace_entry++;
 				if (nes->stack_trace_entry >= NESSYS_STACK_TRACE_ENTRIES) nes->stack_trace_entry = 0;
 				nes->irq_trace_entry++;
 				if (nes->irq_trace_entry >= NESSYS_STACK_TRACE_ENTRIES) nes->irq_trace_entry = 0;
+#endif
 				break;
 			case C6502_INS_BVC:
 				if ((nes->reg.p & C6502_P_V) == 0x00) {
@@ -2129,6 +2157,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				operand = nessys_mem(nes, 0x100, &bank, &offset);
 				*(operand + nes->reg.s) = result >> 8;   nes->reg.s--;
 				*(operand + nes->reg.s) = result & 0xFF; nes->reg.s--;
+#ifdef _DEBUG
 				nes->stack_trace[nes->stack_trace_entry].scanline = nes->scanline;
 				nes->stack_trace[nes->stack_trace_entry].scanline_cycle = nes->scanline_cycle;
 				nes->stack_trace[nes->stack_trace_entry].frame = nes->frame;
@@ -2136,6 +2165,7 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				nes->stack_trace[nes->stack_trace_entry].jump_addr = addr;
 				nes->stack_trace_entry++;
 				if (nes->stack_trace_entry >= NESSYS_STACK_TRACE_ENTRIES) nes->stack_trace_entry = 0;
+#endif
 				nes->reg.pc = addr;
 				break;
 			case C6502_INS_LDA:
@@ -2303,10 +2333,12 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 					nes->ppu.reg[2] = nes->ppu.old_status;
 					reset_ppu_status_after_nmi = 3;
 				}
+#ifdef _DEBUG
 				if (nes->stack_trace_entry == 0) nes->stack_trace_entry = NESSYS_STACK_TRACE_ENTRIES;
 				nes->stack_trace_entry--;
 				if (nes->irq_trace_entry == 0) nes->irq_trace_entry = NESSYS_STACK_TRACE_ENTRIES;
 				nes->irq_trace_entry--;
+#endif
 				break;
 			case C6502_INS_RTS:
 				// get the stack base
@@ -2314,8 +2346,10 @@ uint32_t nessys_exec_cpu_cycles(nessys_t* nes, uint32_t num_cycles)
 				nes->reg.s++; result = *(operand + nes->reg.s);
 				nes->reg.s++; result |= ((uint16_t) * (operand + nes->reg.s)) << 8;
 				nes->reg.pc = result + 1;
+#ifdef _DEBUG
 				if (nes->stack_trace_entry == 0) nes->stack_trace_entry = NESSYS_STACK_TRACE_ENTRIES;
 				nes->stack_trace_entry--;
+#endif
 				break;
 			case C6502_INS_SEC:
 				nes->reg.p |= C6502_P_C;

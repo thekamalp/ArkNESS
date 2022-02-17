@@ -14,6 +14,13 @@
 
 #include "nesmenu.h"
 
+// compiled shader directory
+#ifdef _DEBUG
+#define NES_SHADER_DIR "..\\Debug\\"
+#else
+#define NES_SHADER_DIR "..\\Release\\"
+#endif
+
 // memory map constnts
 const uint32_t NESSYS_RAM_SIZE = 0x800;  // 2KB Ram
 const uint32_t NESSYS_RAM_MASK = NESSYS_RAM_SIZE - 1;
@@ -435,12 +442,14 @@ struct nessys_t {
 	uint8_t mid_scan_ntb_bank_change_position[NESSYS_MAX_MID_SCAN_NTB_BANK_CHANGES];
 	uint8_t* mid_scan_ntb_banks[NESSYS_MAX_MID_SCAN_NTB_BANK_CHANGES * 4];
 	int32_t frame_wait_time;
+#ifdef _DEBUG
 	uint32_t backtrace_entry;
 	uint32_t stack_trace_entry;
 	uint32_t irq_trace_entry;
 	nessys_cpu_backtrace_t backtrace[NESSYS_NUM_CPU_BACKTRACE_ENTRIES];
 	nessys_stack_trace_entry_t stack_trace[NESSYS_STACK_TRACE_ENTRIES];
 	nessys_stack_trace_entry_t irq_trace[NESSYS_STACK_TRACE_ENTRIES];
+#endif
 	// rendering data structures
 	static const uint32_t NUM_GPU_VERSIONS = 2;
 	static const uint32_t NUM_CPU_VERSIONS = 16;
