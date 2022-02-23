@@ -457,6 +457,7 @@ struct nessys_t {
 	k3gfx gfx;
 	k3surf surf_render;
 	k3surf surf_depth;
+	k3surf surf_xbr_edge;
 	k3cmdBuf cmd_buf;
 	k3fence fence;
 	k3gfxState st_background;
@@ -469,6 +470,7 @@ struct nessys_t {
 	k3gfxState st_m9_background;
 	k3gfxState st_copy;
 	k3gfxState st_xbr;
+	k3gfxState st_xbr_edge;
 	k3buffer vb_fullscreen;
 	k3buffer vb_sprite;
 	uint32_t cb_main_cpu_version;

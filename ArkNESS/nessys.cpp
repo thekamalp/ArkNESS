@@ -14,7 +14,7 @@ void nessys_init(nessys_t* nes)
 	nes->apu.pulse[0].env.flags = NESSYS_APU_PULSE_FLAG_SWEEP_ONES_COMP;
 	nes->apu.noise.shift_reg = 0x01;
 	nes->apu.dmc.period = NESSYS_APU_DMC_PERIOD_TABLE[0];
-	nes->win = k3winObj::CreateWindowedWithFormat("ArkNESS", 0, 0, 512, 480, k3fmt::RGBA8_UNORM, 2 * nessys_t::NUM_GPU_VERSIONS + 1 + 2 + 2, 0);
+	nes->win = k3winObj::CreateWindowedWithFormat("ArkNESS", 0, 0, 512, 480, k3fmt::RGBA8_UNORM, 2 * nessys_t::NUM_GPU_VERSIONS + 1 + 1 + 2 + 2, 0);
 	nes->win->SetVisible(true);
 	nes->win->SetCursorVisible(true);
 	nes->win->SetDataPtr(nes);
@@ -37,8 +37,14 @@ void nessys_init(nessys_t* nes)
 	rdesc.format = k3fmt::D24_UNORM_S8_UINT;
 	nes->surf_depth = nes->gfx->CreateSurface(&rdesc, &vdesc, NULL, NULL);
 
+	rdesc.width *= 2;
+	rdesc.height *= 2;
+	rdesc.format = k3fmt::RGBA8_UNORM;
+	vdesc.view_index++;
+	nes->surf_xbr_edge = nes->gfx->CreateSurface(&rdesc, &vdesc, &vdesc, NULL);
+
 	// create shader bindings
-	k3bindingParam bind_params[2];
+	k3bindingParam bind_params[3];
 	bind_params[0].type = k3bindingType::VIEW_SET;
 	bind_params[0].view_set_desc.type = k3shaderBindType::CBV;
 	bind_params[0].view_set_desc.num_views = 1;
@@ -57,7 +63,12 @@ void nessys_init(nessys_t* nes)
 	samp_desc.addr_v = k3texAddr::CLAMP;
 	samp_desc.addr_w = k3texAddr::CLAMP;
 	samp_desc.sampler_index = 0;
-	k3shaderBinding copy_binding = nes->gfx->CreateShaderBinding(2, bind_params, 1, &samp_desc);
+	bind_params[2].type = k3bindingType::VIEW_SET;
+	bind_params[2].view_set_desc.type = k3shaderBindType::SRV;
+	bind_params[2].view_set_desc.num_views = 1;
+	bind_params[2].view_set_desc.reg = 1;
+	bind_params[2].view_set_desc.space = 0;
+	k3shaderBinding copy_binding = nes->gfx->CreateShaderBinding(3, bind_params, 1, &samp_desc);
 
 	// initialize render states
 	k3blendState bs_normal = { 0 };
@@ -117,6 +128,7 @@ void nessys_init(nessys_t* nes)
 	k3shader m9_background_ps = nes->gfx->CreateShaderFromCompiledFile(NES_SHADER_DIR"m9_background_ps.cso");
 	k3shader copy_ps = nes->gfx->CreateShaderFromCompiledFile(NES_SHADER_DIR"copy_ps.cso");
 	k3shader xbr_ps = nes->gfx->CreateShaderFromCompiledFile(NES_SHADER_DIR"xbr_ps.cso");
+	k3shader xbr_edge_ps = nes->gfx->CreateShaderFromCompiledFile(NES_SHADER_DIR"xbr_edge_ps.cso");
 
 	// setup input format
 	k3inputElement in_elem[1];
@@ -189,6 +201,9 @@ void nessys_init(nessys_t* nes)
 	gfx_state_desc.pixel_shader = xbr_ps;
 	nes->st_xbr = nes->gfx->CreateGfxState(&gfx_state_desc);
 
+	gfx_state_desc.pixel_shader = xbr_edge_ps;
+	nes->st_xbr_edge = nes->gfx->CreateGfxState(&gfx_state_desc);
+
 	// Create buffers
 	uint32_t i;
 	for (i = 0; i < nessys_t::NUM_CPU_VERSIONS; i++) {
@@ -233,7 +248,7 @@ void nessys_init(nessys_t* nes)
 
 	bdesc.size = 16 * sizeof(float);
 	bdesc.stride = 0;
-	bdesc.view_index = 1;
+	bdesc.view_index = vdesc.view_index + 1;
 
 	nes->cb_copy_normal = nes->gfx->CreateBuffer(&bdesc);
 	bdesc.view_index++;
@@ -752,6 +767,19 @@ void nessys_scale_to_back_buffer(nessys_t* nes)
 							NESSYS_PPU_PALETTE[1],
 							NESSYS_PPU_PALETTE[2],
 							1.0f };
+	nes->cmd_buf->Reset();
+	if (nes->menu.upscale_type == 1) {
+		rt.render_targets[0] = nes->surf_xbr_edge;
+		nes->cmd_buf->TransitionResource(rt.render_targets[0]->GetResource(), k3resourceState::RENDER_TARGET);
+		nes->cmd_buf->SetRenderTargets(&rt);
+		nes->cmd_buf->SetGfxState(nes->st_xbr_edge);
+		nes->cmd_buf->SetShaderView(1, nes->surf_render);
+		nes->cmd_buf->SetViewToSurface(rt.render_targets[0]->GetResource());
+		nes->cmd_buf->SetDrawPrim(k3drawPrimType::TRIANGLESTRIP);
+		nes->cmd_buf->SetVertexBuffer(0, nes->vb_fullscreen);
+		nes->cmd_buf->Draw(4);
+		nes->cmd_buf->TransitionResource(rt.render_targets[0]->GetResource(), k3resourceState::SHADER_RESOURCE);
+	}
 	rt.render_targets[0] = nes->win->GetBackBuffer();
 	uint32_t win_width = nes->win->GetWidth();
 	uint32_t win_height = nes->win->GetHeight();
@@ -766,7 +794,6 @@ void nessys_scale_to_back_buffer(nessys_t* nes)
 	scissor.y = win_height_pad / 2;
 	scissor.width = win_width - win_width_pad;
 	scissor.height = win_height - win_height_pad;
-	nes->cmd_buf->Reset();
 	nes->cmd_buf->TransitionResource(nes->win->GetBackBuffer()->GetResource(), k3resourceState::RENDER_TARGET);
 	nes->cmd_buf->ClearRenderTarget(nes->win->GetBackBuffer(), clear_color, NULL);
 	nes->cmd_buf->SetRenderTargets(&rt);
@@ -774,9 +801,11 @@ void nessys_scale_to_back_buffer(nessys_t* nes)
 	nes->cmd_buf->SetScissor(&scissor);
 	nes->cmd_buf->SetDrawPrim(k3drawPrimType::TRIANGLESTRIP);
 	nes->cmd_buf->TransitionResource(nes->surf_render->GetResource(), k3resourceState::SHADER_RESOURCE);
-	switch (nes->menu.upscale_type) {
-	case 1: nes->cmd_buf->SetGfxState(nes->st_xbr); break;
-	default: nes->cmd_buf->SetGfxState(nes->st_copy); break;
+	if (nes->menu.upscale_type == 1) {
+		nes->cmd_buf->SetGfxState(nes->st_xbr);
+		nes->cmd_buf->SetShaderView(2, nes->surf_xbr_edge);
+	} else {
+		nes->cmd_buf->SetGfxState(nes->st_copy);
 	}
 	if (nes->menu.pane == nesmenu_pane_t::NONE) {
 		nes->cmd_buf->SetConstantBuffer(0, nes->cb_copy_normal);
