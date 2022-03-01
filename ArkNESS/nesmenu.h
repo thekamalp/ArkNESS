@@ -15,7 +15,8 @@ enum class nesmenu_pane_t {
 	NONE,  // emulation is running
 	MAIN,
 	OPEN,
-	OPTIONS
+	OPTIONS,
+	KEYCONFIG
 };
 
 #ifdef _WIN32
@@ -50,6 +51,16 @@ struct nesmenu_data {
 	uint8_t last_joypad_state[2];
 	uint8_t sprite_line_limit;
 	uint8_t upscale_type;
+	uint8_t key_sel;
+	k3key last_key;
+	k3key up_key;
+	k3key down_key;
+	k3key left_key;
+	k3key right_key;
+	k3key a_key;
+	k3key b_key;
+	k3key start_key;
+	k3key select_key;
 };
 
 const uint32_t nesmenu_main_items = 3;
@@ -58,11 +69,23 @@ const uint8_t nesmenu_main_item_options = 1;
 const uint8_t nesmenu_main_item_exit = 2;
 const char nesmenu_main[nesmenu_main_items][32] = { "Open", "Options", "Exit" };
 
-const uint32_t nesmenu_options_items = 3;
+const uint32_t nesmenu_options_items = 4;
 const uint8_t nesmenu_options_item_sprite_line_limit = 0;
 const uint8_t nesmenu_options_item_upscale_type = 1;
 const uint8_t nesmenu_options_item_vsync = 2;
-const char nesmenu_options[nesmenu_options_items][32] = { "Sprite line limit: ", "Upscale type: ", "VSync: " };
+const uint8_t nesmenu_options_item_key_config = 3;
+const char nesmenu_options[nesmenu_options_items][32] = { "Sprite line limit: ", "Upscale type: ", "VSync: ", "Keyboard config" };
+
+const uint32_t nesmenu_keyconfig_items = 8;
+const uint8_t nesmenu_keyconfig_item_up = 0;
+const uint8_t nesmenu_keyconfig_item_down = 1;
+const uint8_t nesmenu_keyconfig_item_left = 2;
+const uint8_t nesmenu_keyconfig_item_right = 3;
+const uint8_t nesmenu_keyconfig_item_a = 4;
+const uint8_t nesmenu_keyconfig_item_b = 5;
+const uint8_t nesmenu_keyconfig_item_start = 6;
+const uint8_t nesmenu_keyconfig_item_select = 7;
+const char nesmenu_keyconfig[nesmenu_keyconfig_items][32] = { "Up: ", "Down: ", "Left: ", "Right: ", "A: ", "B: ", "Start: ", "Select: " };
 
 void nesmenu_init(nessys_t* nes);
 void nesmenu_update_list(nessys_t* nes);

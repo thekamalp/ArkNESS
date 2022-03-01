@@ -1289,41 +1289,34 @@ void K3CALLBACK nessys_keyboard(void* ptr, k3key k, char c, k3keyState state)
 {
 	nessys_t* nes = (nessys_t*)ptr;
 	uint8_t key_mask = 0x0;
-	switch (k) {
-	case k3key::ESCAPE:
+	if(state == k3keyState::PRESSED) nes->menu.last_key = k;
+	if (k == k3key::ESCAPE) {
 		if (state == k3keyState::PRESSED) {
 			if (nes->menu.message_box != "") {
 				nes->menu.message_box = "";
 			} else {
-				nes->menu.pane = (nes->menu.pane == nesmenu_pane_t::MAIN) ? nesmenu_pane_t::NONE : nesmenu_pane_t::MAIN;
-				nesmenu_update_list(nes);
+				if (nes->menu.key_sel == 0xFF) {
+					nes->menu.pane = (nes->menu.pane == nesmenu_pane_t::MAIN) ? nesmenu_pane_t::NONE : nesmenu_pane_t::MAIN;
+					nesmenu_update_list(nes);
+				}
 			}
 		}
-		break;
-	case k3key::UP:
+	} else if (k == nes->menu.up_key) {
 		key_mask = NESSYS_STD_CONTROLLER_BUTTON_UP_MASK;
-		break;
-	case k3key::DOWN:
+	} else if (k == nes->menu.down_key) {
 		key_mask = NESSYS_STD_CONTROLLER_BUTTON_DOWN_MASK;
-		break;
-	case k3key::LEFT:
+	} else if (k == nes->menu.left_key) {
 		key_mask = NESSYS_STD_CONTROLLER_BUTTON_LEFT_MASK;
-		break;
-	case k3key::RIGHT:
+	} else if (k == nes->menu.right_key) {
 		key_mask = NESSYS_STD_CONTROLLER_BUTTON_RIGHT_MASK;
-		break;
-	case k3key::A:
-		key_mask = NESSYS_STD_CONTROLLER_BUTTON_B_MASK;
-		break;
-	case k3key::S:
+	} else if (k == nes->menu.a_key) {
 		key_mask = NESSYS_STD_CONTROLLER_BUTTON_A_MASK;
-		break;
-	case k3key::Q:
+	} else if (k == nes->menu.b_key) {
+		key_mask = NESSYS_STD_CONTROLLER_BUTTON_B_MASK;
+	} else if (k == nes->menu.select_key) {
 		key_mask = NESSYS_STD_CONTROLLER_BUTTON_SELECT_MASK;
-		break;
-	case k3key::W:
+	} else if (k == nes->menu.start_key) {
 		key_mask = NESSYS_STD_CONTROLLER_BUTTON_START_MASK;
-		break;
 	}
 
 	if (key_mask && nes->num_joy < 2) {
