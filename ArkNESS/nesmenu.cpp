@@ -413,6 +413,8 @@ void nesmenu_display(nessys_t* nes)
 	uint32_t displayable_menu_items = (nes->win->GetHeight() / NESMENU_FONT_HEIGHT) - 1;
 	if (displayable_menu_items > 30) displayable_menu_items = 30;
 
+	uint8_t j = (nes->menu.last_joypad_state[1] != nes->apu.joypad[1]) ? 1 : 0;
+
 	if (nes->menu.pane == nesmenu_pane_t::KEYCONFIG && nes->menu.key_sel < 8) {
 		if (nes->menu.last_key != k3key::NONE) {
 			if (nes->menu.last_key != k3key::ESCAPE) {
@@ -441,35 +443,35 @@ void nesmenu_display(nessys_t* nes)
 			nes->menu.select = select;
 			nes->menu.last_key = k3key::NONE;
 		}
-		nes->menu.last_joypad_state[0] = nes->apu.joypad[0];
+		nes->menu.last_joypad_state[j] = nes->apu.joypad[j];
 	} else {
-		if (nes->menu.last_joypad_state[0] != nes->apu.joypad[0]) {
+		if (nes->menu.last_joypad_state[j] != nes->apu.joypad[j]) {
 			if (nes->menu.message_box != "") {
-				if (nes->apu.joypad[0]) {
+				if (nes->apu.joypad[j]) {
 					nes->menu.message_box = "";
 				}
 			} else {
-				if (nes->apu.joypad[0] & NESSYS_STD_CONTROLLER_BUTTON_DOWN_MASK) {
+				if (nes->apu.joypad[j] & NESSYS_STD_CONTROLLER_BUTTON_DOWN_MASK) {
 					nes->menu.select++;
 					if (nes->menu.select >= cur_menu_items) nes->menu.select = 0;
 				}
-				if (nes->apu.joypad[0] & NESSYS_STD_CONTROLLER_BUTTON_UP_MASK) {
+				if (nes->apu.joypad[j] & NESSYS_STD_CONTROLLER_BUTTON_UP_MASK) {
 					if (nes->menu.select == 0) nes->menu.select = cur_menu_items - 1;
 					else nes->menu.select--;
 				}
-				if (nes->apu.joypad[0] & NESSYS_STD_CONTROLLER_BUTTON_RIGHT_MASK) {
+				if (nes->apu.joypad[j] & NESSYS_STD_CONTROLLER_BUTTON_RIGHT_MASK) {
 					if (nes->menu.select == cur_menu_items - 1) nes->menu.select = 0;
 					else {
 						nes->menu.select += displayable_menu_items;
 						if (nes->menu.select >= cur_menu_items) nes->menu.select = cur_menu_items - 1;
 					}
 				}
-				if (nes->apu.joypad[0] & NESSYS_STD_CONTROLLER_BUTTON_LEFT_MASK) {
+				if (nes->apu.joypad[j] & NESSYS_STD_CONTROLLER_BUTTON_LEFT_MASK) {
 					if (nes->menu.select == 0) nes->menu.select = cur_menu_items - 1;
 					else if (nes->menu.select < displayable_menu_items) nes->menu.select = 0;
 					else nes->menu.select -= displayable_menu_items;
 				}
-				if (nes->apu.joypad[0] & (NESSYS_STD_CONTROLLER_BUTTON_A_MASK | NESSYS_STD_CONTROLLER_BUTTON_START_MASK)) {
+				if (nes->apu.joypad[j] & (NESSYS_STD_CONTROLLER_BUTTON_A_MASK | NESSYS_STD_CONTROLLER_BUTTON_START_MASK)) {
 					switch (nes->menu.pane) {
 					case nesmenu_pane_t::MAIN:
 						switch (nes->menu.select) {
@@ -546,7 +548,7 @@ void nesmenu_display(nessys_t* nes)
 						break;
 					}
 				}
-				if (nes->apu.joypad[0] & NESSYS_STD_CONTROLLER_BUTTON_B_MASK) {
+				if (nes->apu.joypad[j] & NESSYS_STD_CONTROLLER_BUTTON_B_MASK) {
 					switch (nes->menu.pane) {
 					case nesmenu_pane_t::MAIN:
 						// if a cart is loaded, then we can resume it
@@ -569,7 +571,7 @@ void nesmenu_display(nessys_t* nes)
 				}
 
 			}
-			nes->menu.last_joypad_state[0] = nes->apu.joypad[0];
+			nes->menu.last_joypad_state[j] = nes->apu.joypad[j];
 		}
 	}
 
