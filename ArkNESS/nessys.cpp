@@ -312,9 +312,9 @@ void nessys_init(nessys_t* nes)
 	fdesc.transparent = true;
 	nes->main_font = nes->gfx->CreateFont(&fdesc);
 
-	nesmenu_init(nes);
 	nes->num_joy = 0;
 	memset(nes->joy_data, 0, 2 * sizeof(nesjoy_data));
+	nesmenu_init(nes);
 
 	nes->win->SetKeyboardFunc(nessys_keyboard);
 	nes->win->SetJoystickFunc(nessys_joystick_added, nessys_joystick_removed, nessys_joystick_move, nessys_joystick_button);
@@ -1345,10 +1345,16 @@ void K3CALLBACK nessys_joystick_added(void* ptr, uint32_t joystick, const k3joyI
 			case k3joyAxis::POV: nes->joy_data->pov_axis = a; break;
 			}
 		}
-		nes->joy_data[nes->num_joy].button_b = 0;
-		nes->joy_data[nes->num_joy].button_a = 1;
-		nes->joy_data[nes->num_joy].button_start = joy_info->num_buttons - 2;
-		nes->joy_data[nes->num_joy].button_select = joy_info->num_buttons - 1;
+		if ((nes->joy_data[nes->num_joy].button_b == nes->joy_data[nes->num_joy].button_a) ||
+			(nes->joy_data[nes->num_joy].button_b >= joy_info->num_buttons) ||
+			(nes->joy_data[nes->num_joy].button_a >= joy_info->num_buttons) ||
+			(nes->joy_data[nes->num_joy].button_start >= joy_info->num_buttons) ||
+			(nes->joy_data[nes->num_joy].button_select >= joy_info->num_buttons)) {
+			nes->joy_data[nes->num_joy].button_b = 0;
+			nes->joy_data[nes->num_joy].button_a = 1;
+			nes->joy_data[nes->num_joy].button_start = joy_info->num_buttons - 2;
+			nes->joy_data[nes->num_joy].button_select = joy_info->num_buttons - 1;
+		}
 		nes->num_joy++;
 	}
 }
@@ -1408,6 +1414,7 @@ void K3CALLBACK nessys_joystick_button(void* ptr, uint32_t joystick, uint32_t bu
 	uint8_t key_mask = 0;
 	for (j = 0; j < nes->num_joy; j++) {
 		if (nes->joy_data[j].dev_id == joystick) {
+			if (state == k3keyState::PRESSED) nes->joy_data[j].last_button = button;
 			if (nes->joy_data[j].button_a == button) key_mask = NESSYS_STD_CONTROLLER_BUTTON_A_MASK;
 			else if (nes->joy_data[j].button_b == button) key_mask = NESSYS_STD_CONTROLLER_BUTTON_B_MASK;
 			else if (nes->joy_data[j].button_start == button) key_mask = NESSYS_STD_CONTROLLER_BUTTON_START_MASK;

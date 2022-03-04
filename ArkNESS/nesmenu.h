@@ -16,7 +16,8 @@ enum class nesmenu_pane_t {
 	MAIN,
 	OPEN,
 	OPTIONS,
-	KEYCONFIG
+	KEYCONFIG,
+	JOYCONFIG
 };
 
 #ifdef _WIN32
@@ -48,6 +49,7 @@ struct nesmenu_data {
 	uint32_t cur_list_size;
 	uint32_t cur_list_alloc_size;
 	std::string message_box;
+	uint8_t last_num_joy;
 	uint8_t last_joypad_state[2];
 	uint8_t sprite_line_limit;
 	uint8_t upscale_type;
@@ -69,12 +71,13 @@ const uint8_t nesmenu_main_item_options = 1;
 const uint8_t nesmenu_main_item_exit = 2;
 const char nesmenu_main[nesmenu_main_items][32] = { "Open", "Options", "Exit" };
 
-const uint32_t nesmenu_options_items = 4;
+const uint32_t nesmenu_options_items = 5;
 const uint8_t nesmenu_options_item_sprite_line_limit = 0;
 const uint8_t nesmenu_options_item_upscale_type = 1;
 const uint8_t nesmenu_options_item_vsync = 2;
 const uint8_t nesmenu_options_item_key_config = 3;
-const char nesmenu_options[nesmenu_options_items][32] = { "Sprite line limit: ", "Upscale type: ", "VSync: ", "Keyboard config" };
+const uint8_t nesmenu_options_item_joy_config = 4;
+const char nesmenu_options[nesmenu_options_items][32] = { "Sprite line limit: ", "Upscale type: ", "VSync: ", "Keyboard config", "Joystick config" };
 
 const uint32_t nesmenu_keyconfig_items = 8;
 const uint8_t nesmenu_keyconfig_item_up = 0;
@@ -86,6 +89,17 @@ const uint8_t nesmenu_keyconfig_item_b = 5;
 const uint8_t nesmenu_keyconfig_item_start = 6;
 const uint8_t nesmenu_keyconfig_item_select = 7;
 const char nesmenu_keyconfig[nesmenu_keyconfig_items][32] = { "Up: ", "Down: ", "Left: ", "Right: ", "A: ", "B: ", "Start: ", "Select: " };
+
+const uint32_t nesmenu_joyconfig_items = 8;
+const uint8_t nesmenu_joyconfig_item_joy0_a = 0;
+const uint8_t nesmenu_joyconfig_item_joy0_b = 1;
+const uint8_t nesmenu_joyconfig_item_joy0_start = 2;
+const uint8_t nesmenu_joyconfig_item_joy0_select = 3;
+const uint8_t nesmenu_joyconfig_item_joy1_a = 4;
+const uint8_t nesmenu_joyconfig_item_joy1_b = 5;
+const uint8_t nesmenu_joyconfig_item_joy1_start = 6;
+const uint8_t nesmenu_joyconfig_item_joy1_select = 7;
+const char nesmenu_joyconfig[nesmenu_joyconfig_items][32] = { "Joypad0 A: ", "Joypad0 B: ", "Joypad0 Start: ", "Joypad0 Select: ", "Joypad1 A: ", "Joypad1 B: ", "Joypad1 Start: ", "Joypad1 Select: " };
 
 void nesmenu_init(nessys_t* nes);
 void nesmenu_update_list(nessys_t* nes);

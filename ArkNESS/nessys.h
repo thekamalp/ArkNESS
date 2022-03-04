@@ -386,6 +386,7 @@ struct nesjoy_data {
 	uint32_t button_b;
 	uint32_t button_start;
 	uint32_t button_select;
+	uint32_t last_button;
 };
 
 struct nessys_t {

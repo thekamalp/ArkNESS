@@ -365,6 +365,34 @@ void nesmenu_update_list(nessys_t* nes)
 		*key_code = key2code(nes->menu.select_key);
 		nes->menu.cur_list[nesmenu_keyconfig_item_select].item += (nes->menu.key_sel == nesmenu_keyconfig_item_select) ? select_msg : key_str;
 		break;
+	case nesmenu_pane_t::JOYCONFIG:
+		nes->menu.cur_list_size = nesmenu_joyconfig_items;
+		nesmenu_resize_list(&(nes->menu));
+		for (index = 0; index < nesmenu_joyconfig_items; index++) {
+			nes->menu.cur_list[index].item = nesmenu_joyconfig[index];
+			nes->menu.cur_list[index].flag = NESMENU_ITEM_FLAG_NONE;
+		}
+		if (nes->num_joy > 0) {
+			snprintf(key_str, 5, "%d", nes->joy_data[0].button_a + 1);
+			nes->menu.cur_list[nesmenu_joyconfig_item_joy0_a].item += (nes->menu.key_sel == nesmenu_joyconfig_item_joy0_a) ? select_msg : key_str;
+			snprintf(key_str, 5, "%d", nes->joy_data[0].button_b + 1);
+			nes->menu.cur_list[nesmenu_joyconfig_item_joy0_b].item += (nes->menu.key_sel == nesmenu_joyconfig_item_joy0_b) ? select_msg : key_str;
+			snprintf(key_str, 5, "%d", nes->joy_data[0].button_start + 1);
+			nes->menu.cur_list[nesmenu_joyconfig_item_joy0_start].item += (nes->menu.key_sel == nesmenu_joyconfig_item_joy0_start) ? select_msg : key_str;
+			snprintf(key_str, 5, "%d", nes->joy_data[0].button_select + 1);
+			nes->menu.cur_list[nesmenu_joyconfig_item_joy0_select].item += (nes->menu.key_sel == nesmenu_joyconfig_item_joy0_select) ? select_msg : key_str;
+		}
+		if (nes->num_joy > 1) {
+			snprintf(key_str, 5, "%d", nes->joy_data[1].button_a + 1);
+			nes->menu.cur_list[nesmenu_joyconfig_item_joy1_a].item += (nes->menu.key_sel == nesmenu_joyconfig_item_joy1_a) ? select_msg : key_str;
+			snprintf(key_str, 5, "%d", nes->joy_data[1].button_b + 1);
+			nes->menu.cur_list[nesmenu_joyconfig_item_joy1_b].item += (nes->menu.key_sel == nesmenu_joyconfig_item_joy1_b) ? select_msg : key_str;
+			snprintf(key_str, 5, "%d", nes->joy_data[1].button_start + 1);
+			nes->menu.cur_list[nesmenu_joyconfig_item_joy1_start].item += (nes->menu.key_sel == nesmenu_joyconfig_item_joy1_start) ? select_msg : key_str;
+			snprintf(key_str, 5, "%d", nes->joy_data[1].button_select + 1);
+			nes->menu.cur_list[nesmenu_joyconfig_item_joy1_select].item += (nes->menu.key_sel == nesmenu_joyconfig_item_joy1_select) ? select_msg : key_str;
+		}
+		break;
 	case nesmenu_pane_t::OPEN:
 		index = 0;
 		for (const auto& entry : std::filesystem::directory_iterator(nes->menu.cur_dir)) {
@@ -413,6 +441,16 @@ void nesmenu_display(nessys_t* nes)
 	uint32_t displayable_menu_items = (nes->win->GetHeight() / NESMENU_FONT_HEIGHT) - 1;
 	if (displayable_menu_items > 30) displayable_menu_items = 30;
 
+	bool joy_dirty = (nes->num_joy != nes->menu.last_num_joy);
+	nes->menu.last_num_joy = nes->num_joy;
+
+	if (joy_dirty && nes->menu.pane == nesmenu_pane_t::JOYCONFIG) {
+		uint8_t select = nes->menu.select;
+		nes->menu.key_sel = 0xFF;
+		nesmenu_update_list(nes);
+		nes->menu.select = select;
+	}
+
 	uint8_t j = (nes->menu.last_joypad_state[1] != nes->apu.joypad[1]) ? 1 : 0;
 
 	if (nes->menu.pane == nesmenu_pane_t::KEYCONFIG && nes->menu.key_sel < 8) {
@@ -442,6 +480,37 @@ void nesmenu_display(nessys_t* nes)
 			nesmenu_update_list(nes);
 			nes->menu.select = select;
 			nes->menu.last_key = k3key::NONE;
+		}
+		nes->menu.last_joypad_state[j] = nes->apu.joypad[j];
+	} else if(nes->menu.pane == nesmenu_pane_t::JOYCONFIG && nes->menu.key_sel < 8) {
+		if (nes->joy_data[nes->menu.key_sel / 4].last_button < 0xFFFFFFFF) {
+			switch (nes->menu.key_sel) {
+			case nesmenu_joyconfig_item_joy0_a: nes->joy_data[0].button_a = nes->joy_data[0].last_button; break;
+			case nesmenu_joyconfig_item_joy0_b: nes->joy_data[0].button_b = nes->joy_data[0].last_button; break;
+			case nesmenu_joyconfig_item_joy0_start: nes->joy_data[0].button_start = nes->joy_data[0].last_button; break;
+			case nesmenu_joyconfig_item_joy0_select: nes->joy_data[0].button_select = nes->joy_data[0].last_button; break;
+			case nesmenu_joyconfig_item_joy1_a: nes->joy_data[1].button_a = nes->joy_data[1].last_button; break;
+			case nesmenu_joyconfig_item_joy1_b: nes->joy_data[1].button_b = nes->joy_data[1].last_button; break;
+			case nesmenu_joyconfig_item_joy1_start: nes->joy_data[1].button_start = nes->joy_data[1].last_button; break;
+			case nesmenu_joyconfig_item_joy1_select: nes->joy_data[1].button_select = nes->joy_data[1].last_button; break;
+			}
+			nes->menu.key_sel = 0xFF;
+			if (nes->menu.select / 4 == 0) {
+				if (nes->menu.select != nesmenu_joyconfig_item_joy0_a && nes->joy_data[0].button_a == nes->joy_data[0].last_button) nes->menu.key_sel = nesmenu_joyconfig_item_joy0_a;
+				else if (nes->menu.select != nesmenu_joyconfig_item_joy0_b && nes->joy_data[0].button_b == nes->joy_data[0].last_button) nes->menu.key_sel = nesmenu_joyconfig_item_joy0_b;
+				else if (nes->menu.select != nesmenu_joyconfig_item_joy0_start && nes->joy_data[0].button_start == nes->joy_data[0].last_button) nes->menu.key_sel = nesmenu_joyconfig_item_joy0_start;
+				else if (nes->menu.select != nesmenu_joyconfig_item_joy0_select && nes->joy_data[0].button_select == nes->joy_data[0].last_button) nes->menu.key_sel = nesmenu_joyconfig_item_joy0_select;
+			}
+			if (nes->menu.select / 4 == 1) {
+				if (nes->menu.select != nesmenu_joyconfig_item_joy1_a && nes->joy_data[1].button_a == nes->joy_data[1].last_button) nes->menu.key_sel = nesmenu_joyconfig_item_joy1_a;
+				else if (nes->menu.select != nesmenu_joyconfig_item_joy1_b && nes->joy_data[1].button_b == nes->joy_data[1].last_button) nes->menu.key_sel = nesmenu_joyconfig_item_joy1_b;
+				else if (nes->menu.select != nesmenu_joyconfig_item_joy1_start && nes->joy_data[1].button_start == nes->joy_data[1].last_button) nes->menu.key_sel = nesmenu_joyconfig_item_joy1_start;
+				else if (nes->menu.select != nesmenu_joyconfig_item_joy1_select && nes->joy_data[1].button_select == nes->joy_data[1].last_button) nes->menu.key_sel = nesmenu_joyconfig_item_joy1_select;
+			}
+			uint8_t select = (nes->menu.key_sel != 0xFF) ? nes->menu.key_sel : nes->menu.select;
+			nesmenu_update_list(nes);
+			nes->menu.select = select;
+			nes->joy_data[select / 4].last_button = 0xFFFFFFFF;
 		}
 		nes->menu.last_joypad_state[j] = nes->apu.joypad[j];
 	} else {
@@ -511,6 +580,10 @@ void nesmenu_display(nessys_t* nes)
 							nes->menu.pane = nesmenu_pane_t::KEYCONFIG;
 							nesmenu_update_list(nes);
 							break;
+						case nesmenu_options_item_joy_config:
+							nes->menu.pane = nesmenu_pane_t::JOYCONFIG;
+							nesmenu_update_list(nes);
+							break;
 						}
 						break;
 					case nesmenu_pane_t::KEYCONFIG:
@@ -518,6 +591,14 @@ void nesmenu_display(nessys_t* nes)
 						nes->menu.key_sel = nes->menu.select;
 						nesmenu_update_list(nes);
 						nes->menu.select = nes->menu.key_sel;
+						break;
+					case nesmenu_pane_t::JOYCONFIG:
+						if (nes->num_joy > nes->menu.select / 4) {
+							nes->joy_data[nes->menu.select / 4].last_button = 0xFFFFFFFF;
+							nes->menu.key_sel = nes->menu.select;
+							nesmenu_update_list(nes);
+							nes->menu.select = nes->menu.key_sel;
+						}
 						break;
 					case nesmenu_pane_t::OPEN:
 						item = nes->menu.cur_list[nes->menu.select].item;
@@ -564,6 +645,10 @@ void nesmenu_display(nessys_t* nes)
 						nesmenu_update_list(nes);
 						break;
 					case nesmenu_pane_t::KEYCONFIG:
+						nes->menu.pane = nesmenu_pane_t::OPTIONS;
+						nesmenu_update_list(nes);
+						break;
+					case nesmenu_pane_t::JOYCONFIG:
 						nes->menu.pane = nesmenu_pane_t::OPTIONS;
 						nesmenu_update_list(nes);
 						break;
@@ -727,6 +812,30 @@ void nesmenu_load_options(nessys_t* nes)
 					nesmenu_clenup_code(buffer);
 					k = code2key(*code);
 					if (k != k3key::NONE) nes->menu.select_key = k;
+				} else if (!strncmp(buffer, "[JOY0_BUTTON_A]\n", 256)) {
+					fgets(buffer, 256, opt_fh);
+					nes->joy_data[0].button_a = atoi(buffer) - 1;
+				} else if (!strncmp(buffer, "[JOY0_BUTTON_B]\n", 256)) {
+					fgets(buffer, 256, opt_fh);
+					nes->joy_data[0].button_b = atoi(buffer) - 1;
+				} else if (!strncmp(buffer, "[JOY0_BUTTON_START]\n", 256)) {
+					fgets(buffer, 256, opt_fh);
+					nes->joy_data[0].button_start = atoi(buffer) - 1;
+				} else if (!strncmp(buffer, "[JOY0_BUTTON_SELECT]\n", 256)) {
+					fgets(buffer, 256, opt_fh);
+					nes->joy_data[0].button_select = atoi(buffer) - 1;
+				} else if (!strncmp(buffer, "[JOY1_BUTTON_A]\n", 256)) {
+					fgets(buffer, 256, opt_fh);
+					nes->joy_data[1].button_a = atoi(buffer) - 1;
+				} else if (!strncmp(buffer, "[JOY1_BUTTON_B]\n", 256)) {
+					fgets(buffer, 256, opt_fh);
+					nes->joy_data[1].button_b = atoi(buffer) - 1;
+				} else if (!strncmp(buffer, "[JOY1_BUTTON_START]\n", 256)) {
+					fgets(buffer, 256, opt_fh);
+					nes->joy_data[1].button_start = atoi(buffer) - 1;
+				} else if (!strncmp(buffer, "[JOY1_BUTTON_SELECT]\n", 256)) {
+					fgets(buffer, 256, opt_fh);
+					nes->joy_data[1].button_select = atoi(buffer) - 1;
 				}
 			}
 			fclose(opt_fh);
@@ -766,6 +875,14 @@ void nesmenu_save_options(nessys_t* nes)
 			fprintf(opt_fh, "[START_KEY]\n%c%c%c%c\n\n", key_str[0], key_str[1], key_str[2], key_str[3]);
 			*key_code = key2code(nes->menu.select_key);
 			fprintf(opt_fh, "[SELECT_KEY]\n%c%c%c%c\n\n", key_str[0], key_str[1], key_str[2], key_str[3]);
+			fprintf(opt_fh, "[JOY0_BUTTON_A]\n%d\n\n", nes->joy_data[0].button_a + 1);
+			fprintf(opt_fh, "[JOY0_BUTTON_B]\n%d\n\n", nes->joy_data[0].button_b + 1);
+			fprintf(opt_fh, "[JOY0_BUTTON_START]\n%d\n\n", nes->joy_data[0].button_start + 1);
+			fprintf(opt_fh, "[JOY0_BUTTON_SELECT]\n%d\n\n", nes->joy_data[0].button_select + 1);
+			fprintf(opt_fh, "[JOY1_BUTTON_A]\n%d\n\n", nes->joy_data[1].button_a + 1);
+			fprintf(opt_fh, "[JOY1_BUTTON_B]\n%d\n\n", nes->joy_data[1].button_b + 1);
+			fprintf(opt_fh, "[JOY1_BUTTON_START]\n%d\n\n", nes->joy_data[1].button_start + 1);
+			fprintf(opt_fh, "[JOY1_BUTTON_SELECT]\n%d\n\n", nes->joy_data[1].button_select + 1);
 			fclose(opt_fh);
 		}
 	}
