@@ -9,19 +9,37 @@
 
 void nessys_init(nessys_t* nes)
 {
+	k3error::SetHandler(k3error_MsgBoxHandler);
 	memset(nes, 0, sizeof(nessys_t));
 	nes->apu.reg = nes->apu.reg_mem;
 	nes->apu.pulse[0].env.flags = NESSYS_APU_PULSE_FLAG_SWEEP_ONES_COMP;
 	nes->apu.noise.shift_reg = 0x01;
 	nes->apu.dmc.period = NESSYS_APU_DMC_PERIOD_TABLE[0];
 	nes->win = k3winObj::CreateWindowedWithFormat("ArkNESS", 0, 0, 512, 480, k3fmt::RGBA8_UNORM, 2 * nessys_t::NUM_GPU_VERSIONS + 1 + 1 + 2 + 2, 0);
+	if (nes->win == NULL) {
+		k3error::Handler("Could not create window", "nessys_init");
+		return;
+	}
 	nes->win->SetVisible(true);
 	nes->win->SetCursorVisible(true);
 	nes->win->SetDataPtr(nes);
 	nes->gfx = nes->win->GetGfx();
+	if (nes->gfx == NULL) {
+		k3error::Handler("Could not get gfx handle", "nessys_init");
+		k3winObj::Destroy(nes->win);
+		nes->win = NULL;
+		return;
+	}
 	nes->win->SetVsyncInterval(1);
 	nes->cmd_buf = nes->gfx->CreateCmdBuf();
 	nes->fence = nes->gfx->CreateFence();
+	if (nes->cmd_buf == NULL || nes->fence == NULL) {
+		k3error::Handler("Could not create command buffer or fence", "nessys_init");
+		k3winObj::Destroy(nes->win);
+		nes->win = NULL;
+		return;
+	}
+
 
 	// Create depth/stencil surface
 	k3resourceDesc rdesc = { 0 };
@@ -42,6 +60,12 @@ void nessys_init(nessys_t* nes)
 	rdesc.format = k3fmt::RGBA8_UNORM;
 	vdesc.view_index++;
 	nes->surf_xbr_edge = nes->gfx->CreateSurface(&rdesc, &vdesc, &vdesc, NULL);
+	if (nes->surf_render == NULL || nes->surf_depth == NULL || nes->surf_xbr_edge == NULL) {
+		k3error::Handler("Could not create renderable surfaces", "nessys_init");
+		k3winObj::Destroy(nes->win);
+		nes->win = NULL;
+		return;
+	}
 
 	// create shader bindings
 	k3bindingParam bind_params[3];
@@ -69,6 +93,12 @@ void nessys_init(nessys_t* nes)
 	bind_params[2].view_set_desc.reg = 1;
 	bind_params[2].view_set_desc.space = 0;
 	k3shaderBinding copy_binding = nes->gfx->CreateShaderBinding(3, bind_params, 1, &samp_desc);
+	if (shader_binding == NULL || copy_binding == NULL) {
+		k3error::Handler("Could not create shader bindings", "nessys_init");
+		k3winObj::Destroy(nes->win);
+		nes->win = NULL;
+		return;
+	}
 
 	// initialize render states
 	k3blendState bs_normal = { 0 };
@@ -129,6 +159,14 @@ void nessys_init(nessys_t* nes)
 	k3shader copy_ps = nes->gfx->CreateShaderFromCompiledFile(NES_SHADER_DIR"copy_ps.cso");
 	k3shader xbr_ps = nes->gfx->CreateShaderFromCompiledFile(NES_SHADER_DIR"xbr_ps.cso");
 	k3shader xbr_edge_ps = nes->gfx->CreateShaderFromCompiledFile(NES_SHADER_DIR"xbr_edge_ps.cso");
+	if (screen_vs == NULL || sprite_vs == NULL || copy_vs == NULL || fill_ps == NULL || sprite_ps == NULL ||
+		m9_sprite_ps == NULL || background_ps == NULL || exp_background_ps == NULL || m9_background_ps == NULL ||
+		copy_ps == NULL || xbr_ps == NULL || xbr_edge_ps == NULL) {
+		k3error::Handler("Could not create shaders", "nessys_init");
+		k3winObj::Destroy(nes->win);
+		nes->win = NULL;
+		return;
+	}
 
 	// setup input format
 	k3inputElement in_elem[1];
@@ -204,11 +242,26 @@ void nessys_init(nessys_t* nes)
 	gfx_state_desc.pixel_shader = xbr_edge_ps;
 	nes->st_xbr_edge = nes->gfx->CreateGfxState(&gfx_state_desc);
 
+	if (nes->st_background == NULL || nes->st_exp_background == NULL || nes->st_m9_background == NULL ||
+		nes->st_fill == NULL || nes->st_blend_fill == NULL || nes->st_sprite_max == NULL || nes->st_sprite_8 == NULL ||
+		nes->st_m9_sprite == NULL || nes->st_copy == NULL || nes->st_xbr == NULL || nes->st_xbr_edge == NULL) {
+		k3error::Handler("Could not create render states", "nessys_init");
+		k3winObj::Destroy(nes->win);
+		nes->win = NULL;
+		return;
+	}
+
 	// Create buffers
 	uint32_t i;
 	for (i = 0; i < nessys_t::NUM_CPU_VERSIONS; i++) {
 		nes->cb_upload[i] = nes->gfx->CreateUploadBuffer();
 		nes->surf_upload_exp_pattern[i] = nes->gfx->CreateUploadImage();
+		if (nes->cb_upload[i] == NULL || nes->surf_upload_exp_pattern[i] == NULL) {
+			k3error::Handler("Could not create upload buffer/surface", "nessys_init");
+			k3winObj::Destroy(nes->win);
+			nes->win = NULL;
+			return;
+		}
 		nes->surf_upload_exp_pattern[i]->SetDimensions(256, 64, 1, k3fmt::RGBA32_UINT);
 	}
 
@@ -246,6 +299,13 @@ void nessys_init(nessys_t* nes)
 	nes->vb_fullscreen = nes->gfx->CreateBuffer(&bdesc);
 	nes->vb_sprite = nes->gfx->CreateBuffer(&bdesc);
 
+	if (nes->vb_fullscreen == NULL || nes->vb_sprite == NULL) {
+		k3error::Handler("Could not create vertex buffers", "nessys_init");
+		k3winObj::Destroy(nes->win);
+		nes->win = NULL;
+		return;
+	}
+
 	bdesc.size = 16 * sizeof(float);
 	bdesc.stride = 0;
 	bdesc.view_index = vdesc.view_index + 1;
@@ -256,7 +316,10 @@ void nessys_init(nessys_t* nes)
 	nes->cb_copy_menu = nes->gfx->CreateBuffer(&bdesc);
 	bdesc.view_index++;
 
+	float clear_color[] = { 0.0f, 0.0f, 0.0f, 1.0f };
 	nes->cmd_buf->Reset();
+	nes->cmd_buf->TransitionResource(nes->surf_render->GetResource(), k3resourceState::RENDER_TARGET);
+	nes->cmd_buf->ClearRenderTarget(nes->surf_render, clear_color, NULL);
 	nes->cmd_buf->TransitionResource(nes->vb_fullscreen->GetResource(), k3resourceState::COPY_DEST);
 	nes->cmd_buf->TransitionResource(nes->vb_sprite->GetResource(), k3resourceState::COPY_DEST);
 	nes->cmd_buf->TransitionResource(nes->cb_copy_normal->GetResource(), k3resourceState::COPY_DEST);
@@ -274,6 +337,12 @@ void nessys_init(nessys_t* nes)
 	bdesc.size = NESSYS_MAX_CBUFFER_SIZE;
 	for (i = 0; i < nessys_t::NUM_GPU_VERSIONS; i++) {
 		nes->cb_main[i] = nes->gfx->CreateBuffer(&bdesc);
+		if (nes->cb_main[i] == NULL) {
+			k3error::Handler("Could not create constant buffers", "nessys_init");
+			k3winObj::Destroy(nes->win);
+			nes->win = NULL;
+			return;
+		}
 		bdesc.view_index++;
 	}
 
@@ -286,10 +355,22 @@ void nessys_init(nessys_t* nes)
 	vdesc.view_index = bdesc.view_index;
 	for (i = 0; i < nessys_t::NUM_GPU_VERSIONS; i++) {
 		nes->surf_exp_pattern[i] = nes->gfx->CreateSurface(&rdesc, NULL, &vdesc, NULL);
+		if (nes->surf_exp_pattern[i] == NULL) {
+			k3error::Handler("Could not create pattern surface", "nessys_init");
+			k3winObj::Destroy(nes->win);
+			nes->win = NULL;
+			return;
+		}
 		vdesc.view_index++;
 	}
 
 	nes->sb_main = nes->win->CreateSoundBuffer(1, NESSYS_SND_SAMPLES_PER_SECOND, NESSYS_SND_BITS_PER_SAMPLE, NESSYS_SND_SAMPLES);
+	if (nes->sb_main == NULL) {
+		k3error::Handler("Could not create sound buffer", "nessys_init");
+		k3winObj::Destroy(nes->win);
+		nes->win = NULL;
+		return;
+	}
 	void* sbuf_ptr = nes->sb_main->MapForWrite(0, 2 * NESSYS_SND_SAMPLES, NULL, NULL);
 	memset(sbuf_ptr, 0, 2 * NESSYS_SND_SAMPLES);
 	nes->sb_main->Unmap(sbuf_ptr, 0, 2 * NESSYS_SND_SAMPLES);
@@ -311,6 +392,12 @@ void nessys_init(nessys_t* nes)
 	fdesc.cmd_buf = nes->cmd_buf;
 	fdesc.transparent = true;
 	nes->main_font = nes->gfx->CreateFont(&fdesc);
+	if (nes->timer == NULL || nes->main_font == NULL) {
+		k3error::Handler("Could not create timer or font", "nessys_init");
+		k3winObj::Destroy(nes->win);
+		nes->win = NULL;
+		return;
+	}
 
 	nes->num_joy = 0;
 	memset(nes->joy_data, 0, 2 * sizeof(nesjoy_data));
@@ -771,6 +858,7 @@ void nessys_scale_to_back_buffer(nessys_t* nes)
 	if (nes->menu.upscale_type == 1) {
 		rt.render_targets[0] = nes->surf_xbr_edge;
 		nes->cmd_buf->TransitionResource(rt.render_targets[0]->GetResource(), k3resourceState::RENDER_TARGET);
+		nes->cmd_buf->TransitionResource(nes->surf_render->GetResource(), k3resourceState::SHADER_RESOURCE);
 		nes->cmd_buf->SetRenderTargets(&rt);
 		nes->cmd_buf->SetGfxState(nes->st_xbr_edge);
 		nes->cmd_buf->SetShaderView(1, nes->surf_render);
@@ -3013,9 +3101,11 @@ void nessys_unload_cart(nessys_t* nes)
 
 void nessys_cleanup(nessys_t* nes)
 {
-	nes->win->SetDisplayFunc(NULL);
-	nes->win->SetDisplayFunc(NULL);
-	nes->win->SetIdleFunc(NULL);
+	if (nes != NULL && nes->win != NULL) {
+		nes->win->SetDisplayFunc(NULL);
+		nes->win->SetDisplayFunc(NULL);
+		nes->win->SetIdleFunc(NULL);
+	}
 	nesmenu_cleanup(nes);
 }
 

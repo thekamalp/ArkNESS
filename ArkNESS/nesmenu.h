@@ -101,6 +101,10 @@ const uint8_t nesmenu_joyconfig_item_joy1_start = 6;
 const uint8_t nesmenu_joyconfig_item_joy1_select = 7;
 const char nesmenu_joyconfig[nesmenu_joyconfig_items][32] = { "Joypad0 A: ", "Joypad0 B: ", "Joypad0 Start: ", "Joypad0 Select: ", "Joypad1 A: ", "Joypad1 B: ", "Joypad1 Start: ", "Joypad1 Select: " };
 
+#ifdef WIN32
+void nesmenu_win32_open(nessys_t* nes);
+#endif
+
 void nesmenu_init(nessys_t* nes);
 void nesmenu_update_list(nessys_t* nes);
 void nesmenu_display(nessys_t* nes);
