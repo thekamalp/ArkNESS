@@ -55,6 +55,7 @@ void nesmenu_init(nessys_t* nes)
 	}
 #ifdef _WIN32
 	free(home_dir);
+	nesmenu_win32_init(nes);
 #endif
 	nesmenu_update_list(nes);
 	nes->menu.fence_val = 0;
@@ -395,6 +396,9 @@ void nesmenu_update_list(nessys_t* nes)
 		break;
 	case nesmenu_pane_t::OPEN:
 		index = 0;
+#ifdef _WIN32
+		nes->menu.cur_list_size = 0;
+#else
 		for (const auto& entry : std::filesystem::directory_iterator(nes->menu.cur_dir)) {
 			index++;
 		}
@@ -421,6 +425,7 @@ void nesmenu_update_list(nessys_t* nes)
 				index++;
 			}
 		}
+#endif
 		break;
 	}
 }
@@ -545,14 +550,9 @@ void nesmenu_display(nessys_t* nes)
 					case nesmenu_pane_t::MAIN:
 						switch (nes->menu.select) {
 						case nesmenu_main_item_open:
-#ifdef WIN32
-							nesmenu_win32_open(nes);
-							nes->apu.joypad[j] = 0;
-							nesmenu_update_list(nes);
-#else
 							nes->menu.pane = nesmenu_pane_t::OPEN;
 							nesmenu_update_list(nes);
-#endif
+							nes->apu.joypad[j] = 0;
 							break;
 						case nesmenu_main_item_options:
 							nes->menu.pane = nesmenu_pane_t::OPTIONS;
@@ -896,15 +896,52 @@ void nesmenu_save_options(nessys_t* nes)
 
 void nesmenu_cleanup(nessys_t* nes)
 {
-	if (nes != NULL && nes->menu.cur_list != NULL) {
-		delete[] nes->menu.cur_list;
-		nes->menu.cur_list = NULL;
+	if (nes != NULL) {
+		if (nes->menu.cur_list != NULL) {
+			delete[] nes->menu.cur_list;
+			nes->menu.cur_list = NULL;
+		}
+		nes->menu.pane = nesmenu_pane_t::EXIT;
 	}
+#ifdef WIN32
+	nesmenu_win32_cleanup(nes);
+#endif
 }
 
 #ifdef WIN32
 #include <Windows.h>
 #include <ShlObj.h>
+
+DWORD WINAPI nesmenu_win32_dialog_thread(LPVOID ptr)
+{
+	nessys_t* nes = (nessys_t*)ptr;
+	while (nes->menu.pane != nesmenu_pane_t::EXIT) {
+		Sleep(250);
+		if (nes->menu.pane == nesmenu_pane_t::OPEN) {
+			nesmenu_win32_open(nes);
+		}
+	}
+	return 0;
+}
+
+void nesmenu_win32_init(nessys_t* nes)
+{
+	DWORD thread_id;
+	HANDLE h_thread = CreateThread(NULL, 0, nesmenu_win32_dialog_thread, nes, 0, &thread_id);
+	nes->menu.h_thread = h_thread;
+}
+
+void nesmenu_win32_cleanup(nessys_t* nes)
+{
+	//HWND dlg_hwnd = (HWND)nes->menu.hwnd;
+	//if (dlg_hwnd) {
+	//	HRESULT hr = PostMessage(dlg_hwnd, WM_CLOSE, 0, 0);
+	//	MessageBox(NULL, L"Done", L"Done", MB_OK);
+	//}
+
+	WaitForSingleObject(nes->menu.h_thread, INFINITE);
+}
+
 void nesmenu_win32_open(nessys_t* nes)
 {
 	// CoCreate the File Open Dialog object.
@@ -915,7 +952,7 @@ void nesmenu_win32_open(nessys_t* nes)
 		IID_PPV_ARGS(&pfd));
 	if (SUCCEEDED(hr)) {
 		DWORD dwFlags;
-		
+
 		// Before setting, always get the options first in order 
 		// not to override existing options.
 		hr = pfd->GetOptions(&dwFlags);
@@ -923,58 +960,61 @@ void nesmenu_win32_open(nessys_t* nes)
 			// In this case, get shell items only for file system items.
 			hr = pfd->SetOptions(dwFlags | FOS_FORCEFILESYSTEM);
 			if (SUCCEEDED(hr)) {
-				size_t strlen = nes->menu.cur_dir.length() + 1;
-				wchar_t* w_cur_dir = new wchar_t[strlen];
+				size_t strlen;
 				size_t converted_chars = 0;
-				mbstowcs_s(&converted_chars, w_cur_dir, strlen, nes->menu.cur_dir.c_str(), _TRUNCATE);
-				IShellItem* sh_cur_dir;
-				SHCreateItemFromParsingName(w_cur_dir, NULL, IID_PPV_ARGS(&sh_cur_dir));
-				hr = pfd->SetDefaultFolder(sh_cur_dir);
-				sh_cur_dir->Release();
-				delete[] w_cur_dir;
-				if(SUCCEEDED(hr)) {
-					// Show the dialog
-					hr = pfd->Show(NULL);
+				//strlen = nes->menu.cur_dir.length() + 1;
+				//wchar_t* w_cur_dir = new wchar_t[strlen];
+				//mbstowcs_s(&converted_chars, w_cur_dir, strlen, nes->menu.cur_dir.c_str(), _TRUNCATE);
+				//IShellItem* sh_cur_dir;
+				//SHCreateItemFromParsingName(w_cur_dir, NULL, IID_PPV_ARGS(&sh_cur_dir));
+				//hr = pfd->SetDefaultFolder(sh_cur_dir);
+				//sh_cur_dir->Release();
+				//delete[] w_cur_dir;
+
+				// Show the dialog
+				hr = pfd->Show(NULL);
+				if (SUCCEEDED(hr)) {
+					// Obtain the result once the user clicks 
+					// the 'Open' button.
+					// The result is an IShellItem object.
+					IShellItem* psiResult;
+					hr = pfd->GetResult(&psiResult);
 					if (SUCCEEDED(hr)) {
-						// Obtain the result once the user clicks 
-						// the 'Open' button.
-						// The result is an IShellItem object.
-						IShellItem* psiResult;
-						hr = pfd->GetResult(&psiResult);
+						// We are just going to print out the 
+						// name of the file for sample sake.
+						PWSTR pszFilePath = NULL;
+						hr = psiResult->GetDisplayName(SIGDN_FILESYSPATH,
+							&pszFilePath);
 						if (SUCCEEDED(hr)) {
-							// We are just going to print out the 
-							// name of the file for sample sake.
-							PWSTR pszFilePath = NULL;
-							hr = psiResult->GetDisplayName(SIGDN_FILESYSPATH,
-								&pszFilePath);
-							if (SUCCEEDED(hr)) {
-								strlen = wcslen(pszFilePath) + 1;
-								char* rom_file = new char[strlen];
-								wcstombs_s(&converted_chars, rom_file, strlen, pszFilePath, _TRUNCATE);
-								nes->menu.cur_dir = rom_file;
-								strlen = nes->menu.cur_dir.rfind('\\');
-								if (strlen != std::string::npos) {
-									nes->menu.cur_dir = nes->menu.cur_dir.substr(0, strlen);
-								}
-								bool success = nessys_load_cart_filename(nes, rom_file);
-								if (success && (nes->prg_rom_base != NULL)) {
-									// successfully loaded cart
-									nes->menu.pane = nesmenu_pane_t::NONE;
-									nesmenu_update_list(nes);
-								} else {
-									nes->menu.message_box = "Could not load rom file";
-								}
-								delete[] rom_file;
-								CoTaskMemFree(pszFilePath);
+							strlen = wcslen(pszFilePath) + 1;
+							char* rom_file = new char[strlen];
+							wcstombs_s(&converted_chars, rom_file, strlen, pszFilePath, _TRUNCATE);
+							nes->menu.cur_dir = rom_file;
+							strlen = nes->menu.cur_dir.rfind('\\');
+							if (strlen != std::string::npos) {
+								nes->menu.cur_dir = nes->menu.cur_dir.substr(0, strlen);
 							}
-							psiResult->Release();
+							bool success = nessys_load_cart_filename(nes, rom_file);
+							if (success && (nes->prg_rom_base != NULL) && nes->menu.pane != nesmenu_pane_t::EXIT) {
+								// successfully loaded cart
+								nes->menu.pane = nesmenu_pane_t::NONE;
+								nesmenu_update_list(nes);
+							} else {
+								nes->menu.message_box = "Could not load rom file";
+							}
+							delete[] rom_file;
+							CoTaskMemFree(pszFilePath);
 						}
+						psiResult->Release();
 					}
 				}
 			}
 		}
 		pfd->Release();
 	}
-
+	if (nes->menu.pane == nesmenu_pane_t::OPEN) {
+		nes->menu.pane = nesmenu_pane_t::MAIN;
+		nesmenu_update_list(nes);
+	}
 }
 #endif

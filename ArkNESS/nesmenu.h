@@ -17,7 +17,8 @@ enum class nesmenu_pane_t {
 	OPEN,
 	OPTIONS,
 	KEYCONFIG,
-	JOYCONFIG
+	JOYCONFIG,
+	EXIT
 };
 
 #ifdef _WIN32
@@ -63,6 +64,10 @@ struct nesmenu_data {
 	k3key b_key;
 	k3key start_key;
 	k3key select_key;
+#ifdef WIN32
+	void* h_thread;
+	//void* hwnd;
+#endif
 };
 
 const uint32_t nesmenu_main_items = 3;
@@ -102,6 +107,8 @@ const uint8_t nesmenu_joyconfig_item_joy1_select = 7;
 const char nesmenu_joyconfig[nesmenu_joyconfig_items][32] = { "Joypad0 A: ", "Joypad0 B: ", "Joypad0 Start: ", "Joypad0 Select: ", "Joypad1 A: ", "Joypad1 B: ", "Joypad1 Start: ", "Joypad1 Select: " };
 
 #ifdef WIN32
+void nesmenu_win32_init(nessys_t* nes);
+void nesmenu_win32_cleanup(nessys_t* nes);
 void nesmenu_win32_open(nessys_t* nes);
 #endif
 
