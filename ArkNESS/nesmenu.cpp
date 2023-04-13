@@ -903,12 +903,12 @@ void nesmenu_cleanup(nessys_t* nes)
 		}
 		nes->menu.pane = nesmenu_pane_t::EXIT;
 	}
-#ifdef WIN32
+#ifdef _WIN32
 	nesmenu_win32_cleanup(nes);
 #endif
 }
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <Windows.h>
 #include <ShlObj.h>
 
